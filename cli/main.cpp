@@ -118,9 +118,20 @@ printStatus(io_connect_t connect)
     }
 
     std::printf(
-        "protocol=%u clusters=%u\n",
+        "protocol=%u clusters=%u flags=0x%x\n",
         reply.protocol_version,
-        reply.cluster_count);
+        reply.cluster_count,
+        reply.flags);
+
+    const bool mmioDisabled =
+        (reply.flags &
+         kMBUStatusFlagMMIODisabled) != 0;
+
+    if (mmioDisabled) {
+        std::printf(
+            "MMIO access is disabled in this diagnostic build; "
+            "status below contains static addresses/defaults only.\n");
+    }
 
     for (unsigned i = 0;
          i < reply.cluster_count &&
@@ -130,41 +141,58 @@ printStatus(io_connect_t connect)
         const auto &s =
             reply.clusters[i];
 
-        std::printf(
-            "%s\n"
-            "  base          0x%llx\n"
-            "  cmd_phys      0x%llx\n"
-            "  requested_ps  %u\n"
-            "  m1n1_default  %u\n"
-            "  cmd           0x%016llx\n"
-            "  status        0x%016llx\n"
-            "  last_change   0x%016llx\n"
-            "  pll_status    0x%016llx\n"
-            "  pll_factor    0x%016llx\n",
-            clusterName(i),
-            static_cast<
-                unsigned long long>(
-                    s.cluster_base),
-            static_cast<
-                unsigned long long>(
-                    s.command_phys),
-            s.requested_pstate,
-            s.default_pstate,
-            static_cast<
-                unsigned long long>(
-                    s.raw_command),
-            static_cast<
-                unsigned long long>(
-                    s.raw_status),
-            static_cast<
-                unsigned long long>(
-                    s.last_change),
-            static_cast<
-                unsigned long long>(
-                    s.pll_status),
-            static_cast<
-                unsigned long long>(
-                    s.pll_factor));
+        if (mmioDisabled) {
+            std::printf(
+                "%s\n"
+                "  base          0x%llx\n"
+                "  cmd_phys      0x%llx\n"
+                "  requested_ps  unknown\n"
+                "  m1n1_default  %u\n",
+                clusterName(i),
+                static_cast<
+                    unsigned long long>(
+                        s.cluster_base),
+                static_cast<
+                    unsigned long long>(
+                        s.command_phys),
+                s.default_pstate);
+        } else {
+            std::printf(
+                "%s\n"
+                "  base          0x%llx\n"
+                "  cmd_phys      0x%llx\n"
+                "  requested_ps  %u\n"
+                "  m1n1_default  %u\n"
+                "  cmd           0x%016llx\n"
+                "  status        0x%016llx\n"
+                "  last_change   0x%016llx\n"
+                "  pll_status    0x%016llx\n"
+                "  pll_factor    0x%016llx\n",
+                clusterName(i),
+                static_cast<
+                    unsigned long long>(
+                        s.cluster_base),
+                static_cast<
+                    unsigned long long>(
+                        s.command_phys),
+                s.requested_pstate,
+                s.default_pstate,
+                static_cast<
+                    unsigned long long>(
+                        s.raw_command),
+                static_cast<
+                    unsigned long long>(
+                        s.raw_status),
+                static_cast<
+                    unsigned long long>(
+                        s.last_change),
+                static_cast<
+                    unsigned long long>(
+                        s.pll_status),
+                static_cast<
+                    unsigned long long>(
+                        s.pll_factor));
+        }
     }
 
     return 0;
@@ -245,6 +273,11 @@ main(int argc, char **argv)
         if (result == 0)
             result =
                 printStatus(connect);
+        else
+            std::fprintf(
+                stderr,
+                "MMIO writes are intentionally disabled in this "
+                "diagnostic build.\n");
     }
 
     else if (std::strcmp(
