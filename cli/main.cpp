@@ -90,6 +90,45 @@ parseStatusMask(int argc,
     return *mask != 0;
 }
 
+static const char *
+registerName(unsigned r)
+{
+    switch (r) {
+        case kMBURegisterCmd:
+            return "cmd";
+        case kMBURegisterLastChange:
+            return "last_change";
+        case kMBURegisterStatus:
+            return "status";
+        case kMBURegisterPLLStatus:
+            return "pll_status";
+        case kMBURegisterPLLFactor:
+            return "pll_factor";
+        default:
+            return "?";
+    }
+}
+
+static int
+registerIndex(const char *name)
+{
+    if (!name)
+        return -1;
+
+    if (std::strcmp(name, "cmd") == 0)
+        return kMBURegisterCmd;
+    if (std::strcmp(name, "last_change") == 0)
+        return kMBURegisterLastChange;
+    if (std::strcmp(name, "status") == 0)
+        return kMBURegisterStatus;
+    if (std::strcmp(name, "pll_status") == 0)
+        return kMBURegisterPLLStatus;
+    if (std::strcmp(name, "pll_factor") == 0)
+        return kMBURegisterPLLFactor;
+
+    return -1;
+}
+
 static io_connect_t
 openConnection()
 {
@@ -242,7 +281,7 @@ printStatus(io_connect_t connect,
         reply.flags);
 
     std::printf(
-        "on-demand read-only MMIO; writes disabled\n");
+        "metadata-only status; no MMIO was accessed\n");
 
     for (unsigned i = 0;
          i < reply.cluster_count &&
@@ -260,13 +299,7 @@ printStatus(io_connect_t connect,
             "%s\n"
             "  base          0x%llx\n"
             "  cmd_phys      0x%llx\n"
-            "  requested_ps  %u\n"
-            "  m1n1_default  %u\n"
-            "  cmd           0x%016llx\n"
-            "  status        0x%016llx\n"
-            "  last_change   0x%016llx\n"
-            "  pll_status    0x%016llx\n"
-            "  pll_factor    0x%016llx\n",
+            "  m1n1_default  %u\n",
             clusterName(i),
             static_cast<
                 unsigned long long>(
@@ -274,24 +307,66 @@ printStatus(io_connect_t connect,
             static_cast<
                 unsigned long long>(
                     s.command_phys),
-            s.requested_pstate,
-            s.default_pstate,
-            static_cast<
-                unsigned long long>(
-                    s.raw_command),
-            static_cast<
-                unsigned long long>(
-                    s.raw_status),
-            static_cast<
-                unsigned long long>(
-                    s.last_change),
-            static_cast<
-                unsigned long long>(
-                    s.pll_status),
-            static_cast<
-                unsigned long long>(
-                    s.pll_factor));
+            s.default_pstate);
     }
+
+    return 0;
+}
+
+static int
+readRegister(io_connect_t connect,
+             unsigned cluster,
+             unsigned reg)
+{
+    MBUReadRequest request{};
+    request.cluster =
+        static_cast<uint32_t>(cluster);
+    request.reg =
+        static_cast<uint32_t>(reg);
+
+    MBUReadReply reply{};
+    size_t replySize =
+        sizeof(reply);
+
+    kern_return_t kr =
+        IOConnectCallStructMethod(
+            connect,
+            kMBUSelectorReadRegister,
+            &request,
+            sizeof(request),
+            &reply,
+            &replySize);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "read failed: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+        return 1;
+    }
+
+    if (reply.protocol_version
+        != kMBUProtocolVersion) {
+
+        std::fprintf(
+            stderr,
+            "protocol mismatch: kernel=%u user=%u\n",
+            reply.protocol_version,
+            kMBUProtocolVersion);
+        return 1;
+    }
+
+    std::printf(
+        "%s %s\n"
+        "  phys   0x%llx\n"
+        "  value  0x%016llx\n",
+        clusterName(reply.cluster),
+        registerName(reply.reg),
+        static_cast<unsigned long long>(
+            reply.physical_address),
+        static_cast<unsigned long long>(
+            reply.value));
 
     return 0;
 }
@@ -330,11 +405,14 @@ usage(const char *argv0)
         stderr,
         "usage:\n"
         "  %s status <ECPU0|PCPU0|PCPU1> [cluster ...]\n"
+        "  %s read <ECPU0|PCPU0|PCPU1> "
+        "<cmd|last_change|status|pll_status|pll_factor>\n"
         "  %s restore-default\n"
         "  %s hold-default [milliseconds]\n"
         "\n"
-        "Only explicitly named status clusters are touched. "
-        "PCPU1 previously caused a kernel panic while unavailable.\n",
+        "status is metadata-only. read performs exactly one "
+        "64-bit MMIO access at the explicitly selected register.\n",
+        argv0,
         argv0,
         argv0,
         argv0);
@@ -374,6 +452,44 @@ main(int argc, char **argv)
                 printStatus(
                     connect,
                     clusterMask);
+        }
+    }
+
+    else if (std::strcmp(
+                 argv[1],
+                 "read") == 0) {
+
+        if (argc != 4) {
+            usage(argv[0]);
+            result = 2;
+        } else {
+            const int cluster =
+                clusterIndex(argv[2]);
+
+            const int reg =
+                registerIndex(argv[3]);
+
+            if (cluster < 0 || reg < 0) {
+                usage(argv[0]);
+                result = 2;
+            } else {
+                if (cluster ==
+                    kMBUClusterPCPU1) {
+                    std::fprintf(
+                        stderr,
+                        "warning: PCPU1 cmd previously caused an LLC "
+                        "Bus Error while unavailable; this command will "
+                        "perform the requested access exactly.\n");
+                }
+
+                result =
+                    readRegister(
+                        connect,
+                        static_cast<unsigned>(
+                            cluster),
+                        static_cast<unsigned>(
+                            reg));
+            }
         }
     }
 
