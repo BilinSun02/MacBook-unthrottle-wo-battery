@@ -123,14 +123,14 @@ printStatus(io_connect_t connect)
         reply.cluster_count,
         reply.flags);
 
-    const bool mmioDisabled =
+    const bool mmioPartial =
         (reply.flags &
-         kMBUStatusFlagMMIODisabled) != 0;
+         kMBUStatusFlagMMIOPartial) != 0;
 
-    if (mmioDisabled) {
+    if (mmioPartial) {
         std::printf(
-            "MMIO access is disabled in this diagnostic build; "
-            "status below contains static addresses/defaults only.\n");
+            "Partial MMIO diagnostic mode: ECPU0/PCPU0 are read-only; "
+            "PCPU1 is intentionally skipped; writes are disabled.\n");
     }
 
     for (unsigned i = 0;
@@ -141,13 +141,18 @@ printStatus(io_connect_t connect)
         const auto &s =
             reply.clusters[i];
 
-        if (mmioDisabled) {
+        const bool skipped =
+            (s.flags &
+             kMBUClusterFlagSkippedUnavailable) != 0;
+
+        if (skipped) {
             std::printf(
                 "%s\n"
                 "  base          0x%llx\n"
                 "  cmd_phys      0x%llx\n"
-                "  requested_ps  unknown\n"
-                "  m1n1_default  %u\n",
+                "  requested_ps  skipped\n"
+                "  m1n1_default  %u\n"
+                "  note          MMIO not touched (known unavailable target)\n",
                 clusterName(i),
                 static_cast<
                     unsigned long long>(
