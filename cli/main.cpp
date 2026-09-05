@@ -30,6 +30,65 @@ clusterName(unsigned i)
     }
 }
 
+static int
+clusterIndex(const char *name)
+{
+    if (!name)
+        return -1;
+
+    if (std::strcmp(name, "ECPU0") == 0)
+        return kMBUClusterECPU0;
+
+    if (std::strcmp(name, "PCPU0") == 0)
+        return kMBUClusterPCPU0;
+
+    if (std::strcmp(name, "PCPU1") == 0)
+        return kMBUClusterPCPU1;
+
+    return -1;
+}
+
+static bool
+parseStatusMask(int argc,
+                char **argv,
+                uint32_t *mask)
+{
+    if (!mask || argc < 3)
+        return false;
+
+    *mask = 0;
+
+    for (int argi = 2;
+         argi < argc;
+         ++argi) {
+
+        const int cluster =
+            clusterIndex(argv[argi]);
+
+        if (cluster < 0) {
+            std::fprintf(
+                stderr,
+                "unknown cluster: %s\n",
+                argv[argi]);
+            return false;
+        }
+
+        if (cluster == kMBUClusterPCPU1) {
+            std::fprintf(
+                stderr,
+                "PCPU1 is blocked: MMIO address 0x212e20020 "
+                "caused a confirmed LLC Bus Error while unavailable.\n");
+            return false;
+        }
+
+        *mask |=
+            1U << static_cast<unsigned>(
+                cluster);
+    }
+
+    return *mask != 0;
+}
+
 static io_connect_t
 openConnection()
 {
@@ -76,8 +135,13 @@ openConnection()
 }
 
 static int
-printStatus(io_connect_t connect)
+printStatus(io_connect_t connect,
+            uint32_t clusterMask)
 {
+    MBUStatusRequest request{};
+    request.cluster_mask =
+        clusterMask;
+
     MBUStatusReply reply{};
 
     size_t replySize =
@@ -87,8 +151,8 @@ printStatus(io_connect_t connect)
         IOConnectCallStructMethod(
             connect,
             kMBUSelectorGetStatus,
-            nullptr,
-            0,
+            &request,
+            sizeof(request),
             &reply,
             &replySize);
 
@@ -123,15 +187,8 @@ printStatus(io_connect_t connect)
         reply.cluster_count,
         reply.flags);
 
-    const bool mmioPartial =
-        (reply.flags &
-         kMBUStatusFlagMMIOPartial) != 0;
-
-    if (mmioPartial) {
-        std::printf(
-            "Partial MMIO diagnostic mode: ECPU0/PCPU0 are read-only; "
-            "PCPU1 is intentionally skipped; writes are disabled.\n");
-    }
+    std::printf(
+        "on-demand read-only MMIO; writes disabled\n");
 
     for (unsigned i = 0;
          i < reply.cluster_count &&
@@ -140,6 +197,10 @@ printStatus(io_connect_t connect)
 
         const auto &s =
             reply.clusters[i];
+
+        if ((s.flags &
+             kMBUClusterFlagSelected) == 0)
+            continue;
 
         const bool skipped =
             (s.flags &
@@ -236,9 +297,14 @@ usage(const char *argv0)
     std::fprintf(
         stderr,
         "usage:\n"
-        "  %s status\n"
+        "  %s status ECPU0 [PCPU0]\n"
+        "  %s status PCPU0 [ECPU0]\n"
         "  %s restore-default\n"
-        "  %s hold-default [milliseconds]\n",
+        "  %s hold-default [milliseconds]\n"
+        "\n"
+        "PCPU1 status is intentionally blocked because its MMIO "
+        "target is currently unavailable and caused a kernel panic.\n",
+        argv0,
         argv0,
         argv0,
         argv0);
@@ -264,8 +330,21 @@ main(int argc, char **argv)
             argv[1],
             "status") == 0) {
 
-        result =
-            printStatus(connect);
+        uint32_t clusterMask = 0;
+
+        if (!parseStatusMask(
+                argc,
+                argv,
+                &clusterMask)) {
+
+            usage(argv[0]);
+            result = 2;
+        } else {
+            result =
+                printStatus(
+                    connect,
+                    clusterMask);
+        }
     }
 
     else if (std::strcmp(
@@ -277,7 +356,10 @@ main(int argc, char **argv)
 
         if (result == 0)
             result =
-                printStatus(connect);
+                printStatus(
+                    connect,
+                    kMBUClusterMaskECPU0 |
+                    kMBUClusterMaskPCPU0);
         else
             std::fprintf(
                 stderr,
