@@ -332,18 +332,28 @@ MBUnthrottleService::start(
     }
 
     /*
-     * Diagnostic-safe build.
-     *
-     * A previous status request caused an immediate machine reset,
-     * strongly implicating one of the MMIO accesses. Do not map or
-     * touch the DVFS register pages until the panic report identifies
-     * the failing access.
+     * v3 established that ECPU0 and PCPU0 could be read before the
+     * first access to PCPU1 faulted with an LLC Bus Error at
+     * 0x212e20020. Map only the two clusters that were already
+     * successfully traversed. PCPU1 remains completely untouched.
      */
+    for (uint32_t i = 0;
+         i <= kMBUClusterPCPU0;
+         ++i) {
+
+        if (!mapCluster(clusters_[i])) {
+            for (uint32_t j = 0; j < i; ++j)
+                unmapCluster(clusters_[j]);
+
+            return false;
+        }
+    }
+
     registerService();
 
     IOLog(
         "MBUnthrottle: started on T6020 "
-        "(MMIO disabled diagnostic mode)\n");
+        "(partial MMIO: ECPU0+PCPU0 only; writes disabled)\n");
 
     return true;
 }
@@ -434,7 +444,8 @@ MBUnthrottleService::copyStatus(
         kMBUClusterCount;
 
     reply->flags =
-        kMBUStatusFlagMMIODisabled;
+        kMBUStatusFlagMMIOPartial |
+        kMBUStatusFlagWritesDisabled;
 
     for (uint32_t i = 0;
          i < kMBUClusterCount;
@@ -454,15 +465,62 @@ MBUnthrottleService::copyStatus(
             + kDVFSPageOffset
             + kCmdOffset;
 
-        /*
-         * Deliberately leave all raw register fields zero and mark
-         * requested_pstate unknown. No MMIO reads occur in status.
-         */
-        st.requested_pstate =
-            0xffffffffU;
-
         st.default_pstate =
             c.defaultPState;
+
+        if (i == kMBUClusterPCPU1) {
+            /*
+             * Never dereference PCPU1 in this build. The v3 panic
+             * identified its command register address as an
+             * unavailable fabric target.
+             */
+            st.requested_pstate =
+                0xffffffffU;
+
+            st.flags =
+                kMBUClusterFlagSkippedUnavailable;
+
+            continue;
+        }
+
+        if (!c.regs)
+            return kIOReturnNotReady;
+
+        st.flags =
+            kMBUClusterFlagMMIOMapped;
+
+        st.raw_command =
+            read64(
+                c,
+                kCmdOffset);
+
+        st.raw_status =
+            read64(
+                c,
+                kStatusOffset);
+
+        st.last_change =
+            read64(
+                c,
+                kLastChangeOffset);
+
+        st.pll_status =
+            read64(
+                c,
+                kPLLStatusOffset);
+
+        st.pll_factor =
+            read64(
+                c,
+                kPLLFactorOffset);
+
+        st.requested_pstate =
+            static_cast<uint32_t>(
+                st.raw_command
+                & kCmdPStateMask);
+
+        st.flags |=
+            kMBUClusterFlagMMIORead;
     }
 
     return kIOReturnSuccess;
@@ -473,7 +531,7 @@ MBUnthrottleService::restoreDefaults()
 {
     IOLog(
         "MBUnthrottle: restore-default blocked "
-        "while MMIO diagnostic mode is active\n");
+        "while partial-MMIO diagnostic mode is active\n");
 
     return kIOReturnUnsupported;
 }
