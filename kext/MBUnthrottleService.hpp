@@ -22,7 +22,8 @@ public:
                            OSDictionary *properties,
                            IOUserClient **handler) override;
 
-    IOReturn copyStatus(MBUStatusReply *reply);
+    IOReturn copyStatus(const MBUStatusRequest *request,
+                        MBUStatusReply *reply);
     IOReturn restoreDefaults();
 
 private:
