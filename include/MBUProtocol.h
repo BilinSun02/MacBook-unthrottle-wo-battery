@@ -23,20 +23,29 @@ static constexpr uint32_t kMBUClusterMaskPCPU1 =
 static constexpr uint32_t kMBUClusterMaskAll =
     (1U << kMBUClusterCount) - 1U;
 
+enum MBURegister : uint32_t {
+    kMBURegisterCmd = 0,
+    kMBURegisterLastChange = 1,
+    kMBURegisterStatus = 2,
+    kMBURegisterPLLStatus = 3,
+    kMBURegisterPLLFactor = 4,
+    kMBURegisterCount = 5,
+};
+
 enum MBUSelector : uint32_t {
     kMBUSelectorGetStatus = 0,
     kMBUSelectorRestoreDefaults = 1,
-    kMBUSelectorCount = 2,
+    kMBUSelectorReadRegister = 2,
+    kMBUSelectorCount = 3,
 };
 
 enum MBUStatusFlags : uint32_t {
     kMBUStatusFlagWritesDisabled = 1U << 0,
+    kMBUStatusFlagMetadataOnly = 1U << 1,
 };
 
 enum MBUClusterFlags : uint32_t {
     kMBUClusterFlagSelected = 1U << 0,
-    kMBUClusterFlagMMIOMapped = 1U << 1,
-    kMBUClusterFlagMMIORead = 1U << 2,
 };
 
 struct MBUStatusRequest {
@@ -68,4 +77,18 @@ struct MBUStatusReply {
     MBUClusterStatus clusters[kMBUClusterCount];
 };
 
-static constexpr uint32_t kMBUProtocolVersion = 6;
+struct MBUReadRequest {
+    uint32_t cluster;
+    uint32_t reg;
+};
+
+struct MBUReadReply {
+    uint32_t protocol_version;
+    uint32_t cluster;
+    uint32_t reg;
+    uint32_t reserved;
+    uint64_t physical_address;
+    uint64_t value;
+};
+
+static constexpr uint32_t kMBUProtocolVersion = 7;
