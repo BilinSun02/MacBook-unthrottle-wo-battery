@@ -19,6 +19,8 @@
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>OSBundleRequired</key>
+    <string>Root</string>
     <key>OSBundleLibraries</key>
     <dict>
         <key>com.apple.kpi.iokit</key>
@@ -34,8 +36,12 @@
             <string>dev.experimental.MBUnthrottle</string>
             <key>IOClass</key>
             <string>MBUnthrottleService</string>
+            <key>IOMatchCategory</key>
+            <string>MBUnthrottle</string>
             <key>IOProviderClass</key>
             <string>IOResources</string>
+            <key>IOResourceMatch</key>
+            <string>IOKit</string>
         </dict>
     </dict>
 </dict>
