@@ -103,7 +103,7 @@ private:
         },
     };
 
-    bool runningOnT6020();
+    bool runningOnT6020(IOService *provider);
 
     bool mapCluster(ClusterMap &cluster);
     void unmapCluster(ClusterMap &cluster);
