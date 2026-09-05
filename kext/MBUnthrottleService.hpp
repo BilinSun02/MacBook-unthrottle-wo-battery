@@ -3,7 +3,6 @@
 
 #include <IOKit/IOService.h>
 #include <IOKit/IOMemoryDescriptor.h>
-#include <IOKit/IOMemoryMap.h>
 
 #include "../include/MBUProtocol.h"
 
