@@ -6,10 +6,17 @@
 #include <IOKit/IOLib.h>
 
 #define super IOUserClient
-OSDefineMetaClassAndStructors(MBUnthrottleUserClient, IOUserClient)
+OSDefineMetaClassAndStructors(
+    MBUnthrottleUserClient,
+    IOUserClient)
 
 const IOExternalMethodDispatch
-MBUnthrottleUserClient::methods_[kMBUSelectorCount] = {
+MBUnthrottleUserClient::
+methods_[kMBUSelectorCount] = {
+
+    /*
+     * get status
+     */
     {
         &MBUnthrottleUserClient::sGetStatus,
         0,
@@ -17,23 +24,54 @@ MBUnthrottleUserClient::methods_[kMBUSelectorCount] = {
         0,
         sizeof(MBUStatusReply),
     },
+
+    /*
+     * restore known T6020 defaults
+     */
+    {
+        &MBUnthrottleUserClient::
+            sRestoreDefaults,
+        0,
+        0,
+        0,
+        0,
+    },
 };
 
-bool MBUnthrottleUserClient::initWithTask(task_t owningTask,
-                                          void *securityID,
-                                          UInt32 type,
-                                          OSDictionary *properties)
+bool
+MBUnthrottleUserClient::initWithTask(
+    task_t owningTask,
+    void *securityID,
+    UInt32 type,
+    OSDictionary *properties)
 {
-    if (!super::initWithTask(owningTask, securityID, type, properties))
+    if (!super::initWithTask(
+            owningTask,
+            securityID,
+            type,
+            properties))
         return false;
 
-    return clientHasPrivilege(securityID, kIOClientPrivilegeAdministrator)
+    /*
+     * Restrict the MMIO-changing method to an
+     * administrator/root client.
+     */
+    return
+        clientHasPrivilege(
+            securityID,
+            kIOClientPrivilegeAdministrator)
         == kIOReturnSuccess;
 }
 
-bool MBUnthrottleUserClient::start(IOService *provider)
+bool
+MBUnthrottleUserClient::start(
+    IOService *provider)
 {
-    owner_ = OSDynamicCast(MBUnthrottleService, provider);
+    owner_ =
+        OSDynamicCast(
+            MBUnthrottleService,
+            provider);
+
     if (!owner_)
         return false;
 
@@ -45,13 +83,16 @@ bool MBUnthrottleUserClient::start(IOService *provider)
     return true;
 }
 
-IOReturn MBUnthrottleUserClient::clientClose()
+IOReturn
+MBUnthrottleUserClient::clientClose()
 {
     terminate();
+
     return kIOReturnSuccess;
 }
 
-IOReturn MBUnthrottleUserClient::externalMethod(
+IOReturn
+MBUnthrottleUserClient::externalMethod(
     uint32_t selector,
     IOExternalMethodArguments *arguments,
     IOExternalMethodDispatch *,
@@ -64,26 +105,66 @@ IOReturn MBUnthrottleUserClient::externalMethod(
     return super::externalMethod(
         selector,
         arguments,
-        const_cast<IOExternalMethodDispatch *>(&methods_[selector]),
+        const_cast<
+            IOExternalMethodDispatch *>(
+                &methods_[selector]),
         this,
         nullptr);
 }
 
-IOReturn MBUnthrottleUserClient::sGetStatus(
+IOReturn
+MBUnthrottleUserClient::sGetStatus(
     OSObject *target,
     void *,
     IOExternalMethodArguments *arguments)
 {
-    auto *self = OSDynamicCast(MBUnthrottleUserClient, target);
-    if (!self || !self->owner_ || !arguments ||
+    auto *self =
+        OSDynamicCast(
+            MBUnthrottleUserClient,
+            target);
+
+    if (!self ||
+        !self->owner_ ||
+        !arguments ||
         !arguments->structureOutput ||
-        arguments->structureOutputSize < sizeof(MBUStatusReply)) {
+        arguments->structureOutputSize
+            < sizeof(MBUStatusReply)) {
+
         return kIOReturnBadArgument;
     }
 
-    auto *reply = static_cast<MBUStatusReply *>(arguments->structureOutput);
-    const IOReturn ret = self->owner_->copyStatus(reply);
-    if (ret == kIOReturnSuccess)
-        arguments->structureOutputSize = sizeof(*reply);
+    auto *reply =
+        static_cast<
+            MBUStatusReply *>(
+                arguments->structureOutput);
+
+    const IOReturn ret =
+        self->owner_->copyStatus(
+            reply);
+
+    if (ret == kIOReturnSuccess) {
+
+        arguments->structureOutputSize =
+            sizeof(*reply);
+    }
+
     return ret;
+}
+
+IOReturn
+MBUnthrottleUserClient::sRestoreDefaults(
+    OSObject *target,
+    void *,
+    IOExternalMethodArguments *)
+{
+    auto *self =
+        OSDynamicCast(
+            MBUnthrottleUserClient,
+            target);
+
+    if (!self || !self->owner_)
+        return kIOReturnBadArgument;
+
+    return
+        self->owner_->restoreDefaults();
 }
