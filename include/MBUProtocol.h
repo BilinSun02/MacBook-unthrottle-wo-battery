@@ -14,6 +14,15 @@ enum MBUCluster : uint32_t {
     kMBUClusterCount = 3,
 };
 
+static constexpr uint32_t kMBUClusterMaskECPU0 =
+    1U << kMBUClusterECPU0;
+static constexpr uint32_t kMBUClusterMaskPCPU0 =
+    1U << kMBUClusterPCPU0;
+static constexpr uint32_t kMBUClusterMaskPCPU1 =
+    1U << kMBUClusterPCPU1;
+static constexpr uint32_t kMBUClusterMaskAll =
+    (1U << kMBUClusterCount) - 1U;
+
 enum MBUSelector : uint32_t {
     kMBUSelectorGetStatus = 0,
     kMBUSelectorRestoreDefaults = 1,
@@ -21,18 +30,19 @@ enum MBUSelector : uint32_t {
 };
 
 enum MBUStatusFlags : uint32_t {
-    /*
-     * Only clusters known to have survived MMIO reads in the v3
-     * panic path are touched. PCPU1 remains completely untouched.
-     */
-    kMBUStatusFlagMMIOPartial = 1U << 0,
-    kMBUStatusFlagWritesDisabled = 1U << 1,
+    kMBUStatusFlagWritesDisabled = 1U << 0,
 };
 
 enum MBUClusterFlags : uint32_t {
-    kMBUClusterFlagMMIOMapped = 1U << 0,
-    kMBUClusterFlagMMIORead = 1U << 1,
-    kMBUClusterFlagSkippedUnavailable = 1U << 2,
+    kMBUClusterFlagSelected = 1U << 0,
+    kMBUClusterFlagMMIOMapped = 1U << 1,
+    kMBUClusterFlagMMIORead = 1U << 2,
+    kMBUClusterFlagSkippedUnavailable = 1U << 3,
+};
+
+struct MBUStatusRequest {
+    uint32_t cluster_mask;
+    uint32_t reserved;
 };
 
 struct MBUClusterStatus {
@@ -59,4 +69,4 @@ struct MBUStatusReply {
     MBUClusterStatus clusters[kMBUClusterCount];
 };
 
-static constexpr uint32_t kMBUProtocolVersion = 4;
+static constexpr uint32_t kMBUProtocolVersion = 5;
