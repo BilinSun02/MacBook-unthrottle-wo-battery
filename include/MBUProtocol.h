@@ -16,9 +16,7 @@ enum MBUCluster : uint32_t {
 
 enum MBUSelector : uint32_t {
     kMBUSelectorGetStatus = 0,
-    kMBUSelectorSetPState = 1,
-    kMBUSelectorRestoreDefaults = 2,
-    kMBUSelectorCount = 3,
+    kMBUSelectorCount = 1,
 };
 
 struct MBUClusterStatus {
@@ -37,11 +35,6 @@ struct MBUStatusReply {
     uint32_t protocol_version;
     uint32_t cluster_count;
     MBUClusterStatus clusters[kMBUClusterCount];
-};
-
-struct MBUSetPStateRequest {
-    uint32_t cluster;
-    uint32_t pstate;
 };
 
 static constexpr uint32_t kMBUProtocolVersion = 1;
