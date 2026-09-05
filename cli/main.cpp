@@ -218,6 +218,60 @@ dumpNonZeroHex(const unsigned char *data,
 }
 
 static int
+ppmOpenScan()
+{
+    bool any = false;
+
+    for (uint32_t type = 0;
+         type < 16;
+         ++type) {
+
+        io_service_t service =
+            IOServiceGetMatchingService(
+                kIOMainPortDefault,
+                IOServiceMatching(
+                    "ApplePassthroughPPM"));
+
+        if (!service) {
+            std::fprintf(
+                stderr,
+                "ApplePassthroughPPM not found\n");
+            return 1;
+        }
+
+        io_connect_t connect =
+            IO_OBJECT_NULL;
+
+        kern_return_t kr =
+            IOServiceOpen(
+                service,
+                mach_task_self(),
+                type,
+                &connect);
+
+        IOObjectRelease(service);
+
+        std::printf(
+            "type %2u: 0x%08x  %s%s\n",
+            type,
+            kr,
+            mach_error_string(kr),
+            kr == KERN_SUCCESS
+                ? "  OPEN"
+                : "");
+
+        if (kr == KERN_SUCCESS) {
+            any = true;
+
+            if (connect != IO_OBJECT_NULL)
+                IOServiceClose(connect);
+        }
+    }
+
+    return any ? 0 : 1;
+}
+
+static int
 ppmCpms()
 {
     static constexpr uint32_t kSelector =
@@ -761,6 +815,7 @@ usage(const char *argv0)
         "<cmd|last_change|status|pll_status|pll_factor>\n"
         "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
         "  %s hold-pstate <ECPU0|PCPU0|PCPU1> <pstate> [milliseconds]\n"
+        "  %s ppm-open-scan\n"
         "  %s ppm-cpms\n"
         "  %s ppm-client <client-id>\n"
         "  %s restore-default\n"
@@ -778,6 +833,7 @@ usage(const char *argv0)
         argv0,
         argv0,
         argv0,
+        argv0,
         argv0);
 }
 
@@ -787,6 +843,18 @@ main(int argc, char **argv)
     if (argc < 2) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-open-scan") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmOpenScan();
     }
 
     if (std::strcmp(
