@@ -130,6 +130,291 @@ registerIndex(const char *name)
 }
 
 static io_connect_t
+openServiceConnection(const char *serviceClass,
+                      uint32_t type)
+{
+    io_service_t service =
+        IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching(serviceClass));
+
+    if (!service) {
+        std::fprintf(
+            stderr,
+            "%s not found\n",
+            serviceClass);
+        return IO_OBJECT_NULL;
+    }
+
+    io_connect_t connect =
+        IO_OBJECT_NULL;
+
+    kern_return_t kr =
+        IOServiceOpen(
+            service,
+            mach_task_self(),
+            type,
+            &connect);
+
+    IOObjectRelease(service);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "IOServiceOpen(%s,type=%u): %s (0x%x)\n",
+            serviceClass,
+            type,
+            mach_error_string(kr),
+            kr);
+        return IO_OBJECT_NULL;
+    }
+
+    return connect;
+}
+
+static void
+dumpNonZeroHex(const unsigned char *data,
+               size_t size)
+{
+    for (size_t offset = 0;
+         offset < size;
+         offset += 16) {
+
+        const size_t count =
+            size - offset < 16
+                ? size - offset
+                : 16;
+
+        bool nonzero = false;
+
+        for (size_t i = 0;
+             i < count;
+             ++i) {
+
+            if (data[offset + i] != 0) {
+                nonzero = true;
+                break;
+            }
+        }
+
+        if (!nonzero)
+            continue;
+
+        std::printf(
+            "%04zx:",
+            offset);
+
+        for (size_t i = 0;
+             i < count;
+             ++i) {
+
+            std::printf(
+                " %02x",
+                data[offset + i]);
+        }
+
+        std::printf("\n");
+    }
+}
+
+static int
+ppmCpms()
+{
+    static constexpr uint32_t kSelector =
+        0x1e;
+
+    static constexpr size_t kOutputBytes =
+        0x28c0;
+
+    io_connect_t connect =
+        openServiceConnection(
+            "ApplePassthroughPPM",
+            0);
+
+    if (connect == IO_OBJECT_NULL)
+        return 1;
+
+    unsigned char output[kOutputBytes]{};
+
+    size_t outputSize =
+        sizeof(output);
+
+    kern_return_t kr =
+        IOConnectCallMethod(
+            connect,
+            kSelector,
+            nullptr,
+            0,
+            nullptr,
+            0,
+            nullptr,
+            nullptr,
+            output,
+            &outputSize);
+
+    IOServiceClose(connect);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "ppm-cpms selector=0x%x failed: %s (0x%x)\n",
+            kSelector,
+            mach_error_string(kr),
+            kr);
+        return 1;
+    }
+
+    std::printf(
+        "ApplePassthroughPPM CPMS control state\n"
+        "  selector     0x%x\n"
+        "  output_size  0x%zx (%zu)\n"
+        "  nonzero 16-byte rows:\n",
+        kSelector,
+        outputSize,
+        outputSize);
+
+    dumpNonZeroHex(
+        output,
+        outputSize);
+
+    return 0;
+}
+
+static int
+ppmClient(unsigned client)
+{
+    static constexpr uint32_t kSelector =
+        0x1d;
+
+    static constexpr size_t kOutputBytes =
+        0x640;
+
+    static constexpr size_t kCountOffset =
+        0x1b8;
+
+    static constexpr size_t kEntryOffset =
+        0x1c0;
+
+    static constexpr uint32_t kEntryMax =
+        8;
+
+    io_connect_t connect =
+        openServiceConnection(
+            "ApplePassthroughPPM",
+            0);
+
+    if (connect == IO_OBJECT_NULL)
+        return 1;
+
+    uint64_t inputScalars[1] = {
+        client,
+    };
+
+    unsigned char output[kOutputBytes]{};
+
+    size_t outputSize =
+        sizeof(output);
+
+    kern_return_t kr =
+        IOConnectCallMethod(
+            connect,
+            kSelector,
+            inputScalars,
+            1,
+            nullptr,
+            0,
+            nullptr,
+            nullptr,
+            output,
+            &outputSize);
+
+    IOServiceClose(connect);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "ppm-client %u selector=0x%x failed: %s (0x%x)\n",
+            client,
+            kSelector,
+            mach_error_string(kr),
+            kr);
+        return 1;
+    }
+
+    std::printf(
+        "ApplePassthroughPPM client %u\n"
+        "  selector     0x%x\n"
+        "  output_size  0x%zx (%zu)\n",
+        client,
+        kSelector,
+        outputSize,
+        outputSize);
+
+    if (outputSize >=
+        kCountOffset + sizeof(uint32_t)) {
+
+        uint32_t detailedCount = 0;
+
+        std::memcpy(
+            &detailedCount,
+            output + kCountOffset,
+            sizeof(detailedCount));
+
+        std::printf(
+            "  detailed_budget_count  %u\n",
+            detailedCount);
+
+        const uint32_t count =
+            detailedCount < kEntryMax
+                ? detailedCount
+                : kEntryMax;
+
+        for (uint32_t i = 0;
+             i < count;
+             ++i) {
+
+            const size_t offset =
+                kEntryOffset
+                + static_cast<size_t>(i)
+                * 16;
+
+            if (offset + 16 > outputSize)
+                break;
+
+            uint32_t budget = 0;
+            uint64_t details = 0;
+
+            std::memcpy(
+                &budget,
+                output + offset + 4,
+                sizeof(budget));
+
+            std::memcpy(
+                &details,
+                output + offset + 8,
+                sizeof(details));
+
+            std::printf(
+                "  detailed[%u] client=%u budget=%u details=0x%016llx\n",
+                i,
+                output[offset],
+                budget,
+                static_cast<unsigned long long>(
+                    details));
+        }
+    }
+
+    std::printf(
+        "  nonzero 16-byte rows:\n");
+
+    dumpNonZeroHex(
+        output,
+        outputSize);
+
+    return 0;
+}
+
+static io_connect_t
 openConnection()
 {
     io_service_t service =
@@ -476,12 +761,18 @@ usage(const char *argv0)
         "<cmd|last_change|status|pll_status|pll_factor>\n"
         "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
         "  %s hold-pstate <ECPU0|PCPU0|PCPU1> <pstate> [milliseconds]\n"
+        "  %s ppm-cpms\n"
+        "  %s ppm-client <client-id>\n"
         "  %s restore-default\n"
         "  %s hold-default [milliseconds]\n"
         "\n"
+        "ppm-cpms and ppm-client are read-only ApplePassthroughPPM "
+        "queries and do not require MBUnthrottle.kext.\n"
         "status is metadata-only. read performs exactly one "
         "64-bit MMIO load. set-pstate performs one explicit "
         "read-modify-write transition on the selected cluster.\n",
+        argv0,
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -496,6 +787,51 @@ main(int argc, char **argv)
     if (argc < 2) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-cpms") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmCpms();
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-client") == 0) {
+
+        if (argc != 3) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        char *end = nullptr;
+
+        const unsigned long parsed =
+            std::strtoul(
+                argv[2],
+                &end,
+                0);
+
+        if (!end ||
+            *end != '\0' ||
+            parsed > 255) {
+
+            std::fprintf(
+                stderr,
+                "client-id must be 0..255\n");
+
+            return 2;
+        }
+
+        return ppmClient(
+            static_cast<unsigned>(
+                parsed));
     }
 
     io_connect_t connect =
