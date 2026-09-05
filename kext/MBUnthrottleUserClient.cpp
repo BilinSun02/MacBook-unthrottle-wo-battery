@@ -48,6 +48,18 @@ methods_[kMBUSelectorCount] = {
         0,
         sizeof(MBUReadReply),
     },
+
+    /*
+     * write one explicitly selected P-state request
+     */
+    {
+        &MBUnthrottleUserClient::
+            sSetPState,
+        0,
+        sizeof(MBUSetPStateRequest),
+        0,
+        sizeof(MBUSetPStateReply),
+    },
 };
 
 bool
@@ -227,6 +239,53 @@ MBUnthrottleUserClient::sReadRegister(
 
     const IOReturn ret =
         self->owner_->readRegister(
+            request,
+            reply);
+
+    if (ret == kIOReturnSuccess)
+        arguments->structureOutputSize =
+            sizeof(*reply);
+
+    return ret;
+}
+
+
+IOReturn
+MBUnthrottleUserClient::sSetPState(
+    OSObject *target,
+    void *,
+    IOExternalMethodArguments *arguments)
+{
+    auto *self =
+        OSDynamicCast(
+            MBUnthrottleUserClient,
+            target);
+
+    if (!self ||
+        !self->owner_ ||
+        !arguments ||
+        !arguments->structureInput ||
+        arguments->structureInputSize
+            != sizeof(MBUSetPStateRequest) ||
+        !arguments->structureOutput ||
+        arguments->structureOutputSize
+            < sizeof(MBUSetPStateReply)) {
+
+        return kIOReturnBadArgument;
+    }
+
+    const auto *request =
+        static_cast<
+            const MBUSetPStateRequest *>(
+                arguments->structureInput);
+
+    auto *reply =
+        static_cast<
+            MBUSetPStateReply *>(
+                arguments->structureOutput);
+
+    const IOReturn ret =
+        self->owner_->setPState(
             request,
             reply);
 
