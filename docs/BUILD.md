@@ -116,10 +116,10 @@ For this unsigned/ad-hoc development kext, use the load operation in two phases:
    make
    ```
 2. Stage/sign/fix ownership under `/Library/Extensions`.
-3. Run `kmutil load -p /Library/Extensions/MBUnthrottle.kext` **before reboot** so macOS can validate the new build and trigger any required authorization/AuxKC update.
+3. The staging/signing step is what triggers any required kernel-extension authorization/AuxKC handling.
 4. Approve in System Settings if prompted.
 5. Reboot.
-6. Run `kmutil load -p /Library/Extensions/MBUnthrottle.kext` **again after reboot** so the now-present in-kernel fileset kext is marked available/loaded and its personality is matched.
+6. Run `kmutil load -p /Library/Extensions/MBUnthrottle.kext` **after reboot** so the in-kernel fileset kext is loaded and its personality is matched.
 7. Run `./build/mbu status`.
 
-Do not collapse the pre-reboot and post-reboot `kmutil load` steps into one phase.
+A pre-reboot `kmutil load` is not required for this workflow.
