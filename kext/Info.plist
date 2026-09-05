@@ -16,9 +16,9 @@
     <key>CFBundlePackageType</key>
     <string>KEXT</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>0.1.2</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>OSBundleRequired</key>
     <string>Root</string>
     <key>OSBundleLibraries</key>
@@ -39,9 +39,11 @@
             <key>IOMatchCategory</key>
             <string>MBUnthrottle</string>
             <key>IOProviderClass</key>
-            <string>IOResources</string>
-            <key>IOResourceMatch</key>
-            <string>IOKit</string>
+            <string>IOPlatformDevice</string>
+            <key>IONameMatch</key>
+            <string>arm-io,t6020</string>
+            <key>IOProbeScore</key>
+            <integer>1000</integer>
         </dict>
     </dict>
 </dict>
