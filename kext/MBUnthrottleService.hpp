@@ -24,6 +24,8 @@ public:
 
     IOReturn copyStatus(const MBUStatusRequest *request,
                         MBUStatusReply *reply);
+    IOReturn readRegister(const MBUReadRequest *request,
+                          MBUReadReply *reply);
     IOReturn restoreDefaults();
 
 private:
