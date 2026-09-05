@@ -81,7 +81,8 @@ MBUnthrottleService::runningOnT6020(IOService *provider)
 
 bool
 MBUnthrottleService::mapCluster(
-    ClusterMap &cluster)
+    ClusterMap &cluster,
+    bool writable)
 {
     const IOPhysicalAddress phys =
         static_cast<IOPhysicalAddress>(
@@ -92,7 +93,9 @@ MBUnthrottleService::mapCluster(
         IOMemoryDescriptor::withPhysicalAddress(
             phys,
             kDVFSPageLength,
-            kIODirectionIn);
+            writable
+                ? kIODirectionInOut
+                : kIODirectionIn);
 
     if (!cluster.descriptor) {
 
@@ -106,11 +109,17 @@ MBUnthrottleService::mapCluster(
         return false;
     }
 
+    IOOptionBits mapOptions =
+        kIOMapAnywhere |
+        kIOMapInhibitCache;
+
+    if (!writable)
+        mapOptions |=
+            kIOMapReadOnly;
+
     cluster.mapping =
         cluster.descriptor->map(
-            kIOMapAnywhere |
-            kIOMapInhibitCache |
-            kIOMapReadOnly);
+            mapOptions);
 
     if (!cluster.mapping) {
 
@@ -533,7 +542,7 @@ MBUnthrottleService::readRegister(
     ClusterMap &c =
         clusters_[request->cluster];
 
-    if (!mapCluster(c))
+    if (!mapCluster(c, false))
         return kIOReturnNoMemory;
 
     const uint64_t phys =
@@ -569,6 +578,146 @@ MBUnthrottleService::readRegister(
 
     reply->value =
         value;
+
+    return kIOReturnSuccess;
+}
+
+IOReturn
+MBUnthrottleService::setPState(
+    const MBUSetPStateRequest *request,
+    MBUSetPStateReply *reply)
+{
+    if (!request || !reply)
+        return kIOReturnBadArgument;
+
+    if (request->cluster >= kMBUClusterCount)
+        return kIOReturnBadArgument;
+
+    /*
+     * Known T6020 operating-state ranges from the Asahi OPP tables.
+     * ECPU0 also has APSC state 1; P clusters use states 1..17.
+     */
+    const uint32_t maxPState =
+        request->cluster == kMBUClusterECPU0
+            ? 7U
+            : 17U;
+
+    if (request->pstate < 1U ||
+        request->pstate > maxPState)
+        return kIOReturnBadArgument;
+
+    ClusterMap &c =
+        clusters_[request->cluster];
+
+    if (!mapCluster(c, true))
+        return kIOReturnNoMemory;
+
+    const uint64_t phys =
+        c.clusterBase
+        + kDVFSPageOffset
+        + kCmdOffset;
+
+    uint64_t command = 0;
+    bool ready = false;
+
+    for (unsigned i = 0;
+         i < 200;
+         ++i) {
+
+        command =
+            read64(
+                c,
+                kCmdOffset);
+
+        if ((command & kCmdBusy) == 0) {
+            ready = true;
+            break;
+        }
+
+        IODelay(2);
+    }
+
+    if (!ready) {
+        unmapCluster(c);
+        return kIOReturnTimeout;
+    }
+
+    const uint64_t before =
+        command;
+
+    command &=
+        ~kCmdPStateMask;
+
+    command |=
+        static_cast<uint64_t>(
+            request->pstate)
+        & kCmdPStateMask;
+
+    command |=
+        kCmdSet;
+
+    IOLog(
+        "MBUnthrottle: set-pstate %s phys=0x%llx "
+        "before=0x%llx submit=0x%llx pstate=%u\n",
+        c.name,
+        static_cast<unsigned long long>(phys),
+        static_cast<unsigned long long>(before),
+        static_cast<unsigned long long>(command),
+        request->pstate);
+
+    write64(
+        c,
+        kCmdOffset,
+        command);
+
+    uint64_t after = 0;
+    ready = false;
+
+    for (unsigned i = 0;
+         i < 200;
+         ++i) {
+
+        after =
+            read64(
+                c,
+                kCmdOffset);
+
+        if ((after & kCmdBusy) == 0) {
+            ready = true;
+            break;
+        }
+
+        IODelay(2);
+    }
+
+    unmapCluster(c);
+
+    if (!ready)
+        return kIOReturnTimeout;
+
+    bzero(reply,
+          sizeof(*reply));
+
+    reply->protocol_version =
+        kMBUProtocolVersion;
+
+    reply->cluster =
+        request->cluster;
+
+    reply->requested_pstate =
+        request->pstate;
+
+    reply->physical_address =
+        phys;
+
+    reply->command_before =
+        before;
+
+    reply->command_submitted =
+        command;
+
+    reply->command_after =
+        after;
 
     return kIOReturnSuccess;
 }
