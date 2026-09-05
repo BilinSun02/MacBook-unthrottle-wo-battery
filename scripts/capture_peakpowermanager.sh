@@ -4,7 +4,7 @@ set -u
 OUT="${1:-mbu-peakpowermanager-$(date +%Y%m%d-%H%M%S).txt}"
 
 EXE="/usr/libexec/peakpowermanagerd"
-PID="$(pgrep -x peakpowermanagerd 2>/dev/null | head -n 1 || true)"
+PID="$(pgrep -f '^/usr/libexec/peakpowermanagerd([[:space:]]|$)' 2>/dev/null | head -n 1 || true)"
 
 {
     echo "=== date ==="
