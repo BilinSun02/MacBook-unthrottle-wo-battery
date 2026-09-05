@@ -3,7 +3,8 @@ set -u
 
 OUT="${1:-mbu-peakpowermanager-$(date +%Y%m%d-%H%M%S).txt}"
 
-PID="$(pgrep -x peakpowermanager 2>/dev/null | head -n 1 || true)"
+EXE="/usr/libexec/peakpowermanagerd"
+PID="$(pgrep -x peakpowermanagerd 2>/dev/null | head -n 1 || true)"
 
 {
     echo "=== date ==="
@@ -11,21 +12,16 @@ PID="$(pgrep -x peakpowermanager 2>/dev/null | head -n 1 || true)"
     echo
 
     echo "=== peakpowermanager process ==="
-    if [ -z "$PID" ]; then
-        echo "peakpowermanager not running"
-        exit 0
+    if [ -n "$PID" ]; then
+        ps -p "$PID" -o pid=,ppid=,uid=,user=,comm=,command= 2>&1 || true
+    else
+        echo "peakpowermanagerd is not currently resident (continuing with on-disk binary)"
     fi
-
-    ps -p "$PID" -o pid=,ppid=,uid=,user=,comm=,command= 2>&1 || true
     echo
 
     echo "=== executable path ==="
-    EXE="$(sudo lsof -a -p "$PID" -d txt -Fn 2>/dev/null |
-        sed -n 's/^n//p' |
-        head -n 1)"
-
-    if [ -z "$EXE" ]; then
-        echo "could not resolve executable with lsof"
+    if [ ! -x "$EXE" ]; then
+        echo "$EXE not found or not executable"
         exit 0
     fi
 
