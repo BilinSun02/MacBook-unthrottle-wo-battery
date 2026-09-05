@@ -27,11 +27,19 @@ run()
     echo
 
     echo "=== IOService: AppleCLPC ==="
-    ioreg -lw0 -c AppleCLPC 2>&1 || true
+    ioreg -r -c AppleCLPC -l 2>&1 || true
     echo
 
     echo "=== IOService: ApplePassthroughPPM ==="
-    ioreg -lw0 -c ApplePassthroughPPM 2>&1 || true
+    ioreg -r -c ApplePassthroughPPM -l 2>&1 || true
+    echo
+
+    echo "=== IOService: ApplePPMUserClient ==="
+    ioreg -r -c ApplePPMUserClient -l 2>&1 || true
+    echo
+
+    echo "=== IOService: ApplePPM ==="
+    ioreg -r -c ApplePPM -l 2>&1 || true
     echo
 
     echo "=== IODeviceTree: clpc ==="
