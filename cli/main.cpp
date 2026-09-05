@@ -76,9 +76,9 @@ parseStatusMask(int argc,
         if (cluster == kMBUClusterPCPU1) {
             std::fprintf(
                 stderr,
-                "PCPU1 is blocked: MMIO address 0x212e20020 "
-                "caused a confirmed LLC Bus Error while unavailable.\n");
-            return false;
+                "warning: PCPU1 previously caused an LLC Bus Error "
+                "at 0x212e20020 while unavailable; proceeding because "
+                "you explicitly selected it.\n");
         }
 
         *mask |=
@@ -202,63 +202,41 @@ printStatus(io_connect_t connect,
              kMBUClusterFlagSelected) == 0)
             continue;
 
-        const bool skipped =
-            (s.flags &
-             kMBUClusterFlagSkippedUnavailable) != 0;
-
-        if (skipped) {
-            std::printf(
-                "%s\n"
-                "  base          0x%llx\n"
-                "  cmd_phys      0x%llx\n"
-                "  requested_ps  skipped\n"
-                "  m1n1_default  %u\n"
-                "  note          MMIO not touched (known unavailable target)\n",
-                clusterName(i),
-                static_cast<
-                    unsigned long long>(
-                        s.cluster_base),
-                static_cast<
-                    unsigned long long>(
-                        s.command_phys),
-                s.default_pstate);
-        } else {
-            std::printf(
-                "%s\n"
-                "  base          0x%llx\n"
-                "  cmd_phys      0x%llx\n"
-                "  requested_ps  %u\n"
-                "  m1n1_default  %u\n"
-                "  cmd           0x%016llx\n"
-                "  status        0x%016llx\n"
-                "  last_change   0x%016llx\n"
-                "  pll_status    0x%016llx\n"
-                "  pll_factor    0x%016llx\n",
-                clusterName(i),
-                static_cast<
-                    unsigned long long>(
-                        s.cluster_base),
-                static_cast<
-                    unsigned long long>(
-                        s.command_phys),
-                s.requested_pstate,
-                s.default_pstate,
-                static_cast<
-                    unsigned long long>(
-                        s.raw_command),
-                static_cast<
-                    unsigned long long>(
-                        s.raw_status),
-                static_cast<
-                    unsigned long long>(
-                        s.last_change),
-                static_cast<
-                    unsigned long long>(
-                        s.pll_status),
-                static_cast<
-                    unsigned long long>(
-                        s.pll_factor));
-        }
+        std::printf(
+            "%s\n"
+            "  base          0x%llx\n"
+            "  cmd_phys      0x%llx\n"
+            "  requested_ps  %u\n"
+            "  m1n1_default  %u\n"
+            "  cmd           0x%016llx\n"
+            "  status        0x%016llx\n"
+            "  last_change   0x%016llx\n"
+            "  pll_status    0x%016llx\n"
+            "  pll_factor    0x%016llx\n",
+            clusterName(i),
+            static_cast<
+                unsigned long long>(
+                    s.cluster_base),
+            static_cast<
+                unsigned long long>(
+                    s.command_phys),
+            s.requested_pstate,
+            s.default_pstate,
+            static_cast<
+                unsigned long long>(
+                    s.raw_command),
+            static_cast<
+                unsigned long long>(
+                    s.raw_status),
+            static_cast<
+                unsigned long long>(
+                    s.last_change),
+            static_cast<
+                unsigned long long>(
+                    s.pll_status),
+            static_cast<
+                unsigned long long>(
+                    s.pll_factor));
     }
 
     return 0;
@@ -297,14 +275,12 @@ usage(const char *argv0)
     std::fprintf(
         stderr,
         "usage:\n"
-        "  %s status ECPU0 [PCPU0]\n"
-        "  %s status PCPU0 [ECPU0]\n"
+        "  %s status <ECPU0|PCPU0|PCPU1> [cluster ...]\n"
         "  %s restore-default\n"
         "  %s hold-default [milliseconds]\n"
         "\n"
-        "PCPU1 status is intentionally blocked because its MMIO "
-        "target is currently unavailable and caused a kernel panic.\n",
-        argv0,
+        "Only explicitly named status clusters are touched. "
+        "PCPU1 previously caused a kernel panic while unavailable.\n",
         argv0,
         argv0,
         argv0);
