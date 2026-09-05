@@ -43,24 +43,45 @@ dataContainsCString(OSData *data, const char *needle)
 bool
 MBUnthrottleService::runningOnT6020()
 {
-    IORegistryEntry *root =
-        IORegistryEntry::fromPath("/",
+    /*
+     * The Apple SoC compatibility string lives on the arm-io
+     * device-tree node, not on the device-tree root.
+     *
+     * macOS equivalent:
+     *   ioreg -n arm-io -r -l | grep compatible
+     */
+    IORegistryEntry *armio =
+        IORegistryEntry::fromPath("/arm-io",
                                   gIODTPlane);
 
-    if (!root)
+    if (!armio) {
+        IOLog(
+            "MBUnthrottle: IODeviceTree:/arm-io not found\n");
         return false;
+    }
 
     OSData *compatible =
         OSDynamicCast(
             OSData,
-            root->getProperty("compatible"));
+            armio->getProperty("compatible"));
+
+    if (!compatible) {
+        IOLog(
+            "MBUnthrottle: arm-io has no compatible OSData\n");
+        armio->release();
+        return false;
+    }
 
     const bool ok =
         dataContainsCString(
             compatible,
             "apple,t6020");
 
-    root->release();
+    IOLog(
+        "MBUnthrottle: arm-io T6020 check: %s\n",
+        ok ? "yes" : "no");
+
+    armio->release();
 
     return ok;
 }
