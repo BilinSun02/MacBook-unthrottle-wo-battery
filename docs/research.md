@@ -28,13 +28,15 @@ PCPU1  base 0x212e00000  APSC pstate 1  default pstate 6
 Therefore the command register physical addresses are:
 
 ```text
-ECPU0  0x211000020
-PCPU0  0x212000020
-PCPU1  0x213000020
+ECPU0  0x210e20020
+PCPU0  0x211e20020
+PCPU1  0x212e20020
 ```
 
-The current macOS prototype maps the corresponding 4 KiB page at
-`cluster_base + 0x20000` read-only.
+The macOS prototype maps the corresponding 4 KiB page at
+`cluster_base + 0x20000` on demand. Register reads use a read-only mapping;
+the explicit `set-pstate` path maps it writable only for the selected
+read-modify-write operation.
 
 ## Linux apple-soc-cpufreq
 
@@ -84,6 +86,75 @@ The current project deliberately does not modify or expose these registers.
 They are the next things to investigate only if the read-only capture shows
 that the normal DVFS command field is not the layer producing the battery
 fault throttle.
+
+## Experimental results on the faulted-battery T6020 machine
+
+The following behavior has been reproduced on the target M2 Pro MacBook Pro.
+
+### Power-gated P-cluster MMIO can panic
+
+Reading `CLUSTER_PSTATE` while a P cluster is power-gated causes an LLC
+"Unavailable" bus-error panic. Two observed examples were:
+
+```text
+PCPU0  0x211e20020  faulted while PACC1 / cores 4-6 were offline
+PCPU1  0x212e20020  faulted while PACC2 / cores 7-9 were offline
+```
+
+Under sufficient CPU load, `powermetrics` reports both P0 and P1 as 100%
+online with 0% down residency, and the same command-register reads succeed.
+Therefore these addresses are valid but their accessibility depends on the
+corresponding cluster power domain being online.
+
+### Battery throttle is visible in DESIRED1
+
+With the machine otherwise idle, ECPU0 was observed at:
+
+```text
+CLUSTER_PSTATE = 0x0000000000400102
+DESIRED1       = 2
+```
+
+and `powermetrics` showed almost all active E-cluster residency at 912 MHz.
+
+A one-shot RMW to P-state 3 was accepted by hardware:
+
+```text
+before     0x0000000000400102
+submitted  0x0000000002400103
+after      0x0000000000400103
+```
+
+but macOS/APSC restored P-state 2 in under 100 ms.
+
+Repeatedly reasserting the selected state every 10 ms successfully holds the
+hardware near the requested frequency:
+
+```text
+ECPU0 pstate 3 -> ~1284 MHz
+ECPU0 pstate 5 -> ~2004 MHz
+ECPU0 pstate 7 -> ~2424 MHz
+```
+
+This demonstrates that `DESIRED1` is an effective control point for the
+observed E-cluster throttle rather than merely a request ignored by a
+downstream limiter.
+
+### P-cluster command state under full load
+
+With enough CPU burners to keep both P clusters continuously online, both
+command registers were readable and returned the same value:
+
+```text
+PCPU0  0x0000000000404105
+PCPU1  0x0000000000404105
+```
+
+Thus `DESIRED1 = 5` on both clusters at the sampled instant. During the same
+sustained-load condition, `powermetrics` showed both clusters spending their
+active time almost entirely at 1704 and 1968 MHz. The T6020 m1n1 default for
+both P clusters is P-state 6, consistent with the observed state-5/state-6
+operating range.
 
 ## Questions the first capture should answer
 
