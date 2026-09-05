@@ -37,7 +37,6 @@ enum MBUClusterFlags : uint32_t {
     kMBUClusterFlagSelected = 1U << 0,
     kMBUClusterFlagMMIOMapped = 1U << 1,
     kMBUClusterFlagMMIORead = 1U << 2,
-    kMBUClusterFlagSkippedUnavailable = 1U << 3,
 };
 
 struct MBUStatusRequest {
@@ -69,4 +68,4 @@ struct MBUStatusReply {
     MBUClusterStatus clusters[kMBUClusterCount];
 };
 
-static constexpr uint32_t kMBUProtocolVersion = 5;
+static constexpr uint32_t kMBUProtocolVersion = 6;
