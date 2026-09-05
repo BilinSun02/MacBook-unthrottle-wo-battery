@@ -156,6 +156,23 @@ active time almost entirely at 1704 and 1968 MHz. The T6020 m1n1 default for
 both P clusters is P-state 6, consistent with the observed state-5/state-6
 operating range.
 
+### Cross-cluster response when overriding one P cluster
+
+With both P clusters held 100% online and 100% hardware-active by CPU burners,
+holding only PCPU0 at P-state 7 produced a strongly asymmetric result:
+
+```text
+PCPU0 -> 2208 MHz (P-state 7), 100% residency
+PCPU1 -> 1188 MHz (P-state 3), 100% residency
+```
+
+PCPU1 remained fully online and fully active, so the drop to 1188 MHz was not
+caused by cluster power-gating or lack of work. This suggests a package-level
+or cross-cluster policy that redistributes the fault/battery throttle when one
+P cluster is forced above the policy-selected range. A direct PCPU1 command
+read while PCPU0 is being held should distinguish policy-requested P-state 3
+from a downstream hardware limit.
+
 ## Questions the first capture should answer
 
 1. Under sustained CPU load with the faulted battery, what requested P-state
