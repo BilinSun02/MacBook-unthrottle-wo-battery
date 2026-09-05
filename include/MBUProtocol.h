@@ -22,11 +22,17 @@ enum MBUSelector : uint32_t {
 
 enum MBUStatusFlags : uint32_t {
     /*
-     * Diagnostic-safe mode: no MMIO mapping, reads, or writes are
-     * performed by the kext. This is intentionally set while we
-     * isolate the kernel panic seen during the earlier status call.
+     * Only clusters known to have survived MMIO reads in the v3
+     * panic path are touched. PCPU1 remains completely untouched.
      */
-    kMBUStatusFlagMMIODisabled = 1U << 0,
+    kMBUStatusFlagMMIOPartial = 1U << 0,
+    kMBUStatusFlagWritesDisabled = 1U << 1,
+};
+
+enum MBUClusterFlags : uint32_t {
+    kMBUClusterFlagMMIOMapped = 1U << 0,
+    kMBUClusterFlagMMIORead = 1U << 1,
+    kMBUClusterFlagSkippedUnavailable = 1U << 2,
 };
 
 struct MBUClusterStatus {
@@ -41,6 +47,8 @@ struct MBUClusterStatus {
 
     uint32_t requested_pstate;
     uint32_t default_pstate;
+    uint32_t flags;
+    uint32_t reserved;
 };
 
 struct MBUStatusReply {
@@ -51,4 +59,4 @@ struct MBUStatusReply {
     MBUClusterStatus clusters[kMBUClusterCount];
 };
 
-static constexpr uint32_t kMBUProtocolVersion = 3;
+static constexpr uint32_t kMBUProtocolVersion = 4;
