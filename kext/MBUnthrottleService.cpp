@@ -430,14 +430,6 @@ MBUnthrottleService::copyStatus(
         (mask & ~kMBUClusterMaskAll) != 0)
         return kIOReturnBadArgument;
 
-    /*
-     * PCPU1 is a confirmed fatal target on this machine while that
-     * cluster is unavailable/power-gated. Never touch it from this
-     * diagnostic build, even if a malformed userspace client asks.
-     */
-    if ((mask & kMBUClusterMaskPCPU1) != 0)
-        return kIOReturnUnsupported;
-
     bzero(reply,
           sizeof(*reply));
 
@@ -480,19 +472,17 @@ MBUnthrottleService::copyStatus(
         st.flags |=
             kMBUClusterFlagSelected;
 
-        if (i == kMBUClusterPCPU1) {
-            st.requested_pstate =
-                0xffffffffU;
-            st.flags |=
-                kMBUClusterFlagSkippedUnavailable;
-            continue;
-        }
-
         if (!mapCluster(c))
             return kIOReturnNoMemory;
 
         st.flags |=
             kMBUClusterFlagMMIOMapped;
+
+        IOLog(
+            "MBUnthrottle: status reading %s cmd=0x%llx\n",
+            c.name,
+            static_cast<unsigned long long>(
+                st.command_phys));
 
         /*
          * Read the selected cluster only. Keep the mapping lifetime
