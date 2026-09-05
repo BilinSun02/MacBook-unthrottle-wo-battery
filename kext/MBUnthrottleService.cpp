@@ -333,9 +333,25 @@ MBUnthrottleService::start(
     }
 
     /*
+     * Publish the userspace ABI version before registering the
+     * service. This lets the CLI detect a stale AuxKC/kext generation
+     * before issuing an external method with the wrong layout.
+     */
+    if (!setProperty(
+            "MBUProtocolVersion",
+            static_cast<unsigned long long>(
+                kMBUProtocolVersion),
+            32)) {
+
+        IOLog(
+            "MBUnthrottle: failed to publish protocol version\n");
+        return false;
+    }
+
+    /*
      * Do not map any cluster MMIO at startup. The CLI supplies an
      * explicit cluster mask for each status request, and only those
-     * selected safe clusters are mapped/read on demand.
+     * selected clusters are mapped/read on demand.
      */
     registerService();
 
