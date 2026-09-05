@@ -36,7 +36,8 @@ enum MBUSelector : uint32_t {
     kMBUSelectorGetStatus = 0,
     kMBUSelectorRestoreDefaults = 1,
     kMBUSelectorReadRegister = 2,
-    kMBUSelectorCount = 3,
+    kMBUSelectorSetPState = 3,
+    kMBUSelectorCount = 4,
 };
 
 enum MBUStatusFlags : uint32_t {
@@ -91,4 +92,20 @@ struct MBUReadReply {
     uint64_t value;
 };
 
-static constexpr uint32_t kMBUProtocolVersion = 7;
+struct MBUSetPStateRequest {
+    uint32_t cluster;
+    uint32_t pstate;
+};
+
+struct MBUSetPStateReply {
+    uint32_t protocol_version;
+    uint32_t cluster;
+    uint32_t requested_pstate;
+    uint32_t reserved;
+    uint64_t physical_address;
+    uint64_t command_before;
+    uint64_t command_submitted;
+    uint64_t command_after;
+};
+
+static constexpr uint32_t kMBUProtocolVersion = 8;
