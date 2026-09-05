@@ -265,6 +265,25 @@ This confirms that the same package-level stack has CPU/GPU/ANE power-split
 concepts, which is why fixing the policy source is preferable to maintaining
 per-engine frequency overrides.
 
+### PPM user-client open type is build-dependent
+
+On macOS 26.6 / Darwin 25.6 build 25G83 on the T6020 target,
+`IOServiceOpen(ApplePassthroughPPM, type=0)` returns
+`kIOReturnUnsupported (0xe00002c7)`.
+
+The public reverse-engineering probe this project referenced contains a
+separate `ppm-open-scan` routine that tries connection types 0 through 15,
+even though its later CPMS helper hardcodes type 0. Therefore type 0 must not
+be assumed portable across builds. The CLI now exposes:
+
+```sh
+./build/mbu ppm-open-scan
+```
+
+which only opens/closes candidate connection types and reports the result.
+Do not issue CPMS selectors on a nonzero type until the successful user-client
+type is identified and its ABI is verified.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
