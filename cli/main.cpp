@@ -165,8 +165,8 @@ openConnection()
             stderr,
             "loaded MBUnthrottleService does not advertise "
             "MBUProtocolVersion; the running kext is stale/older "
-            "than this CLI. Re-stage the current kext, run kmutil "
-            "load before reboot, reboot, then kmutil load again.\n");
+            "than this CLI. Re-stage/sign the current kext, approve it if "
+            "prompted, reboot, then run kmutil load once after reboot.\n");
 
         IOObjectRelease(service);
 
@@ -374,7 +374,8 @@ readRegister(io_connect_t connect,
 static int
 setPState(io_connect_t connect,
           unsigned cluster,
-          unsigned pstate)
+          unsigned pstate,
+          bool verbose = true)
 {
     MBUSetPStateRequest request{};
     request.cluster =
@@ -415,22 +416,24 @@ setPState(io_connect_t connect,
         return 1;
     }
 
-    std::printf(
-        "%s pstate %u\n"
-        "  phys       0x%llx\n"
-        "  before     0x%016llx\n"
-        "  submitted  0x%016llx\n"
-        "  after      0x%016llx\n",
-        clusterName(reply.cluster),
-        reply.requested_pstate,
-        static_cast<unsigned long long>(
-            reply.physical_address),
-        static_cast<unsigned long long>(
-            reply.command_before),
-        static_cast<unsigned long long>(
-            reply.command_submitted),
-        static_cast<unsigned long long>(
-            reply.command_after));
+    if (verbose) {
+        std::printf(
+            "%s pstate %u\n"
+            "  phys       0x%llx\n"
+            "  before     0x%016llx\n"
+            "  submitted  0x%016llx\n"
+            "  after      0x%016llx\n",
+            clusterName(reply.cluster),
+            reply.requested_pstate,
+            static_cast<unsigned long long>(
+                reply.physical_address),
+            static_cast<unsigned long long>(
+                reply.command_before),
+            static_cast<unsigned long long>(
+                reply.command_submitted),
+            static_cast<unsigned long long>(
+                reply.command_after));
+    }
 
     return 0;
 }
@@ -472,12 +475,14 @@ usage(const char *argv0)
         "  %s read <ECPU0|PCPU0|PCPU1> "
         "<cmd|last_change|status|pll_status|pll_factor>\n"
         "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
+        "  %s hold-pstate <ECPU0|PCPU0|PCPU1> <pstate> [milliseconds]\n"
         "  %s restore-default\n"
         "  %s hold-default [milliseconds]\n"
         "\n"
         "status is metadata-only. read performs exactly one "
         "64-bit MMIO load. set-pstate performs one explicit "
         "read-modify-write transition on the selected cluster.\n",
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -624,6 +629,120 @@ main(int argc, char **argv)
                                 cluster),
                             static_cast<unsigned>(
                                 parsed));
+                }
+            }
+        }
+    }
+
+    else if (std::strcmp(
+                 argv[1],
+                 "hold-pstate") == 0) {
+
+        if (argc < 4 || argc > 5) {
+            usage(argv[0]);
+            result = 2;
+        } else {
+            const int cluster =
+                clusterIndex(argv[2]);
+
+            char *end = nullptr;
+            const long parsedPState =
+                std::strtol(
+                    argv[3],
+                    &end,
+                    10);
+
+            if (cluster < 0 ||
+                !end ||
+                *end != '\0' ||
+                parsedPState < 1 ||
+                parsedPState > 31) {
+
+                usage(argv[0]);
+                result = 2;
+            } else {
+                const unsigned maxPState =
+                    cluster ==
+                        kMBUClusterECPU0
+                        ? 7U
+                        : 17U;
+
+                if (static_cast<unsigned>(
+                        parsedPState) > maxPState) {
+
+                    std::fprintf(
+                        stderr,
+                        "pstate out of known T6020 range: "
+                        "%s accepts 1..%u\n",
+                        clusterName(
+                            static_cast<unsigned>(
+                                cluster)),
+                        maxPState);
+
+                    result = 2;
+                } else {
+                    unsigned intervalMs = 10;
+
+                    if (argc == 5) {
+                        char *intervalEnd = nullptr;
+                        const long parsedInterval =
+                            std::strtol(
+                                argv[4],
+                                &intervalEnd,
+                                10);
+
+                        if (!intervalEnd ||
+                            *intervalEnd != '\0' ||
+                            parsedInterval < 1 ||
+                            parsedInterval > 5000) {
+
+                            std::fprintf(
+                                stderr,
+                                "interval must be 1..5000 ms\n");
+                            IOServiceClose(connect);
+                            return 2;
+                        }
+
+                        intervalMs =
+                            static_cast<unsigned>(
+                                parsedInterval);
+                    }
+
+                    if (cluster !=
+                        kMBUClusterECPU0) {
+
+                        std::fprintf(
+                            stderr,
+                            "warning: repeated P-cluster MMIO can panic "
+                            "if that cluster power-gates between writes; "
+                            "proceeding because you explicitly selected it.\n");
+                    }
+
+                    std::printf(
+                        "holding %s at pstate %ld every %u ms\n"
+                        "Ctrl-C to stop\n",
+                        clusterName(
+                            static_cast<unsigned>(
+                                cluster)),
+                        parsedPState,
+                        intervalMs);
+
+                    for (;;) {
+                        if (setPState(
+                                connect,
+                                static_cast<unsigned>(
+                                    cluster),
+                                static_cast<unsigned>(
+                                    parsedPState),
+                                false) != 0) {
+
+                            result = 1;
+                            break;
+                        }
+
+                        usleep(
+                            intervalMs * 1000);
+                    }
                 }
             }
         }
