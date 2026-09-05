@@ -27,7 +27,7 @@ bool MBUnthrottleUserClient::initWithTask(task_t owningTask,
     if (!super::initWithTask(owningTask, securityID, type, properties))
         return false;
 
-    return clientHasPrivilege(owningTask, kIOClientPrivilegeAdministrator)
+    return clientHasPrivilege(securityID, kIOClientPrivilegeAdministrator)
         == kIOReturnSuccess;
 }
 
