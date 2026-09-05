@@ -36,6 +36,18 @@ methods_[kMBUSelectorCount] = {
         0,
         0,
     },
+
+    /*
+     * read one explicitly selected 64-bit register
+     */
+    {
+        &MBUnthrottleUserClient::
+            sReadRegister,
+        0,
+        sizeof(MBUReadRequest),
+        0,
+        sizeof(MBUReadReply),
+    },
 };
 
 bool
@@ -176,4 +188,51 @@ MBUnthrottleUserClient::sRestoreDefaults(
 
     return
         self->owner_->restoreDefaults();
+}
+
+
+IOReturn
+MBUnthrottleUserClient::sReadRegister(
+    OSObject *target,
+    void *,
+    IOExternalMethodArguments *arguments)
+{
+    auto *self =
+        OSDynamicCast(
+            MBUnthrottleUserClient,
+            target);
+
+    if (!self ||
+        !self->owner_ ||
+        !arguments ||
+        !arguments->structureInput ||
+        arguments->structureInputSize
+            != sizeof(MBUReadRequest) ||
+        !arguments->structureOutput ||
+        arguments->structureOutputSize
+            < sizeof(MBUReadReply)) {
+
+        return kIOReturnBadArgument;
+    }
+
+    const auto *request =
+        static_cast<
+            const MBUReadRequest *>(
+                arguments->structureInput);
+
+    auto *reply =
+        static_cast<
+            MBUReadReply *>(
+                arguments->structureOutput);
+
+    const IOReturn ret =
+        self->owner_->readRegister(
+            request,
+            reply);
+
+    if (ret == kIOReturnSuccess)
+        arguments->structureOutputSize =
+            sizeof(*reply);
+
+    return ret;
 }
