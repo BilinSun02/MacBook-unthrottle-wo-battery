@@ -41,47 +41,40 @@ dataContainsCString(OSData *data, const char *needle)
 }
 
 bool
-MBUnthrottleService::runningOnT6020()
+MBUnthrottleService::runningOnT6020(IOService *provider)
 {
-    /*
-     * The Apple SoC compatibility string lives on the arm-io
-     * device-tree node, not on the device-tree root.
-     *
-     * macOS equivalent:
-     *   ioreg -n arm-io -r -l | grep compatible
-     */
-    IORegistryEntry *armio =
-        IORegistryEntry::fromPath("/arm-io",
-                                  gIODTPlane);
-
-    if (!armio) {
-        IOLog(
-            "MBUnthrottle: IODeviceTree:/arm-io not found\n");
+    if (!provider) {
+        IOLog("MBUnthrottle: null provider\n");
         return false;
     }
 
+    /*
+     * On Apple silicon, the arm-io node itself is an IOPlatformDevice
+     * and its compatible property uses the "arm-io,tXXXX" form.
+     *
+     * The Info.plist personality already matches arm-io,t6020; this
+     * runtime check is an additional guard before touching MMIO.
+     */
     OSData *compatible =
         OSDynamicCast(
             OSData,
-            armio->getProperty("compatible"));
+            provider->getProperty("compatible"));
 
     if (!compatible) {
         IOLog(
-            "MBUnthrottle: arm-io has no compatible OSData\n");
-        armio->release();
+            "MBUnthrottle: matched provider has no compatible OSData\n");
         return false;
     }
 
     const bool ok =
         dataContainsCString(
             compatible,
-            "apple,t6020");
+            "arm-io,t6020");
 
     IOLog(
-        "MBUnthrottle: arm-io T6020 check: %s\n",
+        "MBUnthrottle: provider=%s T6020 check: %s\n",
+        provider->getName() ? provider->getName() : "(null)",
         ok ? "yes" : "no");
-
-    armio->release();
 
     return ok;
 }
@@ -329,7 +322,7 @@ MBUnthrottleService::start(
     if (!super::start(provider))
         return false;
 
-    if (!runningOnT6020()) {
+    if (!runningOnT6020(provider)) {
 
         IOLog(
             "MBUnthrottle: refusing to start: "
