@@ -18,7 +18,7 @@ extern kern_return_t _stop(kmod_info_t *ki, void *data);
  */
 KMOD_EXPLICIT_DECL(
     dev.experimental.MBUnthrottle,
-    "0.1.7",
+    "0.1.8",
     _start,
     _stop
 )
