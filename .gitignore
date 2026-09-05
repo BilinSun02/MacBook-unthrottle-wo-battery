@@ -1,0 +1,4 @@
+build/
+*.kext.dSYM/
+mbu-capture-*.txt
+.DS_Store
