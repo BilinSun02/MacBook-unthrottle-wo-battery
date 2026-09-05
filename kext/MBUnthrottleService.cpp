@@ -326,35 +326,24 @@ MBUnthrottleService::start(
 
         IOLog(
             "MBUnthrottle: refusing to start: "
-            "not apple,t6020\n");
+            "provider is not arm-io,t6020\n");
 
         return false;
     }
 
-    for (uint32_t i = 0;
-         i < kMBUClusterCount;
-         ++i) {
-
-        if (!mapCluster(
-                clusters_[i])) {
-
-            for (uint32_t j = 0;
-                 j < i;
-                 ++j) {
-
-                unmapCluster(
-                    clusters_[j]);
-            }
-
-            return false;
-        }
-    }
-
+    /*
+     * Diagnostic-safe build.
+     *
+     * A previous status request caused an immediate machine reset,
+     * strongly implicating one of the MMIO accesses. Do not map or
+     * touch the DVFS register pages until the panic report identifies
+     * the failing access.
+     */
     registerService();
 
     IOLog(
-        "MBUnthrottle: started "
-        "on T6020\n");
+        "MBUnthrottle: started on T6020 "
+        "(MMIO disabled diagnostic mode)\n");
 
     return true;
 }
@@ -444,6 +433,9 @@ MBUnthrottleService::copyStatus(
     reply->cluster_count =
         kMBUClusterCount;
 
+    reply->flags =
+        kMBUStatusFlagMMIODisabled;
+
     for (uint32_t i = 0;
          i < kMBUClusterCount;
          ++i) {
@@ -451,51 +443,25 @@ MBUnthrottleService::copyStatus(
         const ClusterMap &c =
             clusters_[i];
 
-        if (!c.regs)
-            return kIOReturnNotReady;
-
-        auto &s =
+        auto &st =
             reply->clusters[i];
 
-        s.cluster_base =
+        st.cluster_base =
             c.clusterBase;
 
-        s.command_phys =
+        st.command_phys =
             c.clusterBase
             + kDVFSPageOffset
             + kCmdOffset;
 
-        s.raw_command =
-            read64(
-                c,
-                kCmdOffset);
+        /*
+         * Deliberately leave all raw register fields zero and mark
+         * requested_pstate unknown. No MMIO reads occur in status.
+         */
+        st.requested_pstate =
+            0xffffffffU;
 
-        s.raw_status =
-            read64(
-                c,
-                kStatusOffset);
-
-        s.last_change =
-            read64(
-                c,
-                kLastChangeOffset);
-
-        s.pll_status =
-            read64(
-                c,
-                kPLLStatusOffset);
-
-        s.pll_factor =
-            read64(
-                c,
-                kPLLFactorOffset);
-
-        s.requested_pstate =
-            static_cast<uint32_t>(
-                s.raw_command
-                & kCmdPStateMask);
-
-        s.default_pstate =
+        st.default_pstate =
             c.defaultPState;
     }
 
@@ -505,21 +471,9 @@ MBUnthrottleService::copyStatus(
 IOReturn
 MBUnthrottleService::restoreDefaults()
 {
-    /*
-     * Deliberately restrict writes to the known
-     * m1n1 T6020 defaults.
-     */
-    for (uint32_t i = 0;
-         i < kMBUClusterCount;
-         ++i) {
+    IOLog(
+        "MBUnthrottle: restore-default blocked "
+        "while MMIO diagnostic mode is active\n");
 
-        const IOReturn ret =
-            setKnownDefaultPState(
-                clusters_[i]);
-
-        if (ret != kIOReturnSuccess)
-            return ret;
-    }
-
-    return kIOReturnSuccess;
+    return kIOReturnUnsupported;
 }
