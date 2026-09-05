@@ -26,6 +26,8 @@ public:
                         MBUStatusReply *reply);
     IOReturn readRegister(const MBUReadRequest *request,
                           MBUReadReply *reply);
+    IOReturn setPState(const MBUSetPStateRequest *request,
+                       MBUSetPStateReply *reply);
     IOReturn restoreDefaults();
 
 private:
@@ -108,7 +110,8 @@ private:
 
     bool runningOnT6020(IOService *provider);
 
-    bool mapCluster(ClusterMap &cluster);
+    bool mapCluster(ClusterMap &cluster,
+                    bool writable);
     void unmapCluster(ClusterMap &cluster);
 
     uint64_t read64(const ClusterMap &cluster,
