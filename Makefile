@@ -20,13 +20,13 @@ kext:
 	@test -d "$(KERNEL_HEADERS)" || (echo "Kernel headers not found in SDK" && false)
 	@mkdir -p $(BUILD)/MBUnthrottle.kext/Contents/MacOS $(BUILD)/obj
 	$(CXX) -x c++ -arch $(ARCH) -std=c++17 -O2 \
-		-DKERNEL -DKERNEL_PRIVATE -D__KERNEL__ -mkernel -fapple-kext \
+		-DKERNEL -D__KERNEL__ -mkernel -fapple-kext \
 		-fno-builtin -fno-exceptions -fno-rtti -fno-common \
 		-fno-use-cxa-atexit -nostdinc \
 		-I$(KERNEL_HEADERS) -Iinclude -Ikext \
 		-c kext/MBUnthrottleService.cpp -o $(BUILD)/obj/service.o
 	$(CXX) -x c++ -arch $(ARCH) -std=c++17 -O2 \
-		-DKERNEL -DKERNEL_PRIVATE -D__KERNEL__ -mkernel -fapple-kext \
+		-DKERNEL -D__KERNEL__ -mkernel -fapple-kext \
 		-fno-builtin -fno-exceptions -fno-rtti -fno-common \
 		-fno-use-cxa-atexit -nostdinc \
 		-I$(KERNEL_HEADERS) -Iinclude -Ikext \
