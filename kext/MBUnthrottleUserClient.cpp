@@ -20,7 +20,7 @@ methods_[kMBUSelectorCount] = {
     {
         &MBUnthrottleUserClient::sGetStatus,
         0,
-        0,
+        sizeof(MBUStatusRequest),
         0,
         sizeof(MBUStatusReply),
     },
@@ -126,12 +126,20 @@ MBUnthrottleUserClient::sGetStatus(
     if (!self ||
         !self->owner_ ||
         !arguments ||
+        !arguments->structureInput ||
+        arguments->structureInputSize
+            != sizeof(MBUStatusRequest) ||
         !arguments->structureOutput ||
         arguments->structureOutputSize
             < sizeof(MBUStatusReply)) {
 
         return kIOReturnBadArgument;
     }
+
+    const auto *request =
+        static_cast<
+            const MBUStatusRequest *>(
+                arguments->structureInput);
 
     auto *reply =
         static_cast<
@@ -140,6 +148,7 @@ MBUnthrottleUserClient::sGetStatus(
 
     const IOReturn ret =
         self->owner_->copyStatus(
+            request,
             reply);
 
     if (ret == kIOReturnSuccess) {
