@@ -60,4 +60,9 @@ private:
         OSObject *target,
         void *reference,
         IOExternalMethodArguments *arguments);
+
+    static IOReturn sSetPState(
+        OSObject *target,
+        void *reference,
+        IOExternalMethodArguments *arguments);
 };
