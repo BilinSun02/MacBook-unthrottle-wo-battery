@@ -357,7 +357,7 @@ MBUnthrottleService::start(
 
     IOLog(
         "MBUnthrottle: started on T6020 "
-        "(on-demand read-only MMIO; writes disabled)\n");
+        "(metadata status + explicit single-register reads; writes disabled)\n");
 
     return true;
 }
@@ -456,13 +456,14 @@ MBUnthrottleService::copyStatus(
         kMBUClusterCount;
 
     reply->flags =
-        kMBUStatusFlagWritesDisabled;
+        kMBUStatusFlagWritesDisabled |
+        kMBUStatusFlagMetadataOnly;
 
     for (uint32_t i = 0;
          i < kMBUClusterCount;
          ++i) {
 
-        ClusterMap &c =
+        const ClusterMap &c =
             clusters_[i];
 
         auto &st =
@@ -479,66 +480,95 @@ MBUnthrottleService::copyStatus(
         st.default_pstate =
             c.defaultPState;
 
-        const uint32_t bit =
-            1U << i;
-
-        if ((mask & bit) == 0)
+        if ((mask & (1U << i)) == 0)
             continue;
 
-        st.flags |=
+        st.flags =
             kMBUClusterFlagSelected;
 
-        if (!mapCluster(c))
-            return kIOReturnNoMemory;
-
-        st.flags |=
-            kMBUClusterFlagMMIOMapped;
-
-        IOLog(
-            "MBUnthrottle: status reading %s cmd=0x%llx\n",
-            c.name,
-            static_cast<unsigned long long>(
-                st.command_phys));
-
         /*
-         * Read the selected cluster only. Keep the mapping lifetime
-         * tightly scoped to this one status request.
+         * Metadata only: status must never dereference MMIO.
          */
-        st.raw_command =
-            read64(
-                c,
-                kCmdOffset);
-
-        st.raw_status =
-            read64(
-                c,
-                kStatusOffset);
-
-        st.last_change =
-            read64(
-                c,
-                kLastChangeOffset);
-
-        st.pll_status =
-            read64(
-                c,
-                kPLLStatusOffset);
-
-        st.pll_factor =
-            read64(
-                c,
-                kPLLFactorOffset);
-
         st.requested_pstate =
-            static_cast<uint32_t>(
-                st.raw_command
-                & kCmdPStateMask);
-
-        st.flags |=
-            kMBUClusterFlagMMIORead;
-
-        unmapCluster(c);
+            0xffffffffU;
     }
+
+    return kIOReturnSuccess;
+}
+
+IOReturn
+MBUnthrottleService::readRegister(
+    const MBUReadRequest *request,
+    MBUReadReply *reply)
+{
+    if (!request || !reply)
+        return kIOReturnBadArgument;
+
+    if (request->cluster >= kMBUClusterCount ||
+        request->reg >= kMBURegisterCount)
+        return kIOReturnBadArgument;
+
+    uint32_t offset = 0;
+
+    switch (request->reg) {
+        case kMBURegisterCmd:
+            offset = kCmdOffset;
+            break;
+        case kMBURegisterLastChange:
+            offset = kLastChangeOffset;
+            break;
+        case kMBURegisterStatus:
+            offset = kStatusOffset;
+            break;
+        case kMBURegisterPLLStatus:
+            offset = kPLLStatusOffset;
+            break;
+        case kMBURegisterPLLFactor:
+            offset = kPLLFactorOffset;
+            break;
+        default:
+            return kIOReturnBadArgument;
+    }
+
+    ClusterMap &c =
+        clusters_[request->cluster];
+
+    if (!mapCluster(c))
+        return kIOReturnNoMemory;
+
+    const uint64_t phys =
+        c.clusterBase
+        + kDVFSPageOffset
+        + offset;
+
+    IOLog(
+        "MBUnthrottle: read %s reg=%u phys=0x%llx\n",
+        c.name,
+        request->reg,
+        static_cast<unsigned long long>(phys));
+
+    const uint64_t value =
+        read64(c, offset);
+
+    unmapCluster(c);
+
+    bzero(reply,
+          sizeof(*reply));
+
+    reply->protocol_version =
+        kMBUProtocolVersion;
+
+    reply->cluster =
+        request->cluster;
+
+    reply->reg =
+        request->reg;
+
+    reply->physical_address =
+        phys;
+
+    reply->value =
+        value;
 
     return kIOReturnSuccess;
 }
