@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <IOKit/IOKitLib.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 #include <mach/mach_error.h>
 
@@ -103,6 +104,59 @@ openConnection()
         std::fprintf(
             stderr,
             "MBUnthrottleService not found\n");
+
+        return IO_OBJECT_NULL;
+    }
+
+    CFTypeRef property =
+        IORegistryEntryCreateCFProperty(
+            service,
+            CFSTR("MBUProtocolVersion"),
+            kCFAllocatorDefault,
+            0);
+
+    if (!property ||
+        CFGetTypeID(property) !=
+            CFNumberGetTypeID()) {
+
+        if (property)
+            CFRelease(property);
+
+        std::fprintf(
+            stderr,
+            "loaded MBUnthrottleService does not advertise "
+            "MBUProtocolVersion; the running kext is stale/older "
+            "than this CLI. Re-stage the current kext, run kmutil "
+            "load before reboot, reboot, then kmutil load again.\n");
+
+        IOObjectRelease(service);
+
+        return IO_OBJECT_NULL;
+    }
+
+    int32_t kernelProtocol = 0;
+
+    const Boolean gotProtocol =
+        CFNumberGetValue(
+            static_cast<CFNumberRef>(property),
+            kCFNumberSInt32Type,
+            &kernelProtocol);
+
+    CFRelease(property);
+
+    if (!gotProtocol ||
+        kernelProtocol !=
+            static_cast<int32_t>(
+                kMBUProtocolVersion)) {
+
+        std::fprintf(
+            stderr,
+            "protocol mismatch before IOServiceOpen: "
+            "kernel=%d user=%u\n",
+            kernelProtocol,
+            kMBUProtocolVersion);
+
+        IOObjectRelease(service);
 
         return IO_OBJECT_NULL;
     }
