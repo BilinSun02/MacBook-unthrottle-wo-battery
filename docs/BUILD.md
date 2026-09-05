@@ -104,3 +104,22 @@ Because this is a kext experiment, know how to return to recoveryOS before
 testing. If the extension prevents normal boot, use the standard Apple recovery
 path to undo the experimental kext/AuxKC change rather than repeatedly forcing
 boots.
+
+
+## Apple-silicon development load sequence
+
+For this unsigned/ad-hoc development kext, use the load operation in two phases:
+
+1. Build both artifacts after any clean:
+   ```sh
+   make clean
+   make
+   ```
+2. Stage/sign/fix ownership under `/Library/Extensions`.
+3. Run `kmutil load -p /Library/Extensions/MBUnthrottle.kext` **before reboot** so macOS can validate the new build and trigger any required authorization/AuxKC update.
+4. Approve in System Settings if prompted.
+5. Reboot.
+6. Run `kmutil load -p /Library/Extensions/MBUnthrottle.kext` **again after reboot** so the now-present in-kernel fileset kext is marked available/loaded and its personality is matched.
+7. Run `./build/mbu status`.
+
+Do not collapse the pre-reboot and post-reboot `kmutil load` steps into one phase.
