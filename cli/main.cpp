@@ -372,6 +372,70 @@ readRegister(io_connect_t connect,
 }
 
 static int
+setPState(io_connect_t connect,
+          unsigned cluster,
+          unsigned pstate)
+{
+    MBUSetPStateRequest request{};
+    request.cluster =
+        static_cast<uint32_t>(cluster);
+    request.pstate =
+        static_cast<uint32_t>(pstate);
+
+    MBUSetPStateReply reply{};
+    size_t replySize =
+        sizeof(reply);
+
+    kern_return_t kr =
+        IOConnectCallStructMethod(
+            connect,
+            kMBUSelectorSetPState,
+            &request,
+            sizeof(request),
+            &reply,
+            &replySize);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "set-pstate failed: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+        return 1;
+    }
+
+    if (reply.protocol_version
+        != kMBUProtocolVersion) {
+
+        std::fprintf(
+            stderr,
+            "protocol mismatch: kernel=%u user=%u\n",
+            reply.protocol_version,
+            kMBUProtocolVersion);
+        return 1;
+    }
+
+    std::printf(
+        "%s pstate %u\n"
+        "  phys       0x%llx\n"
+        "  before     0x%016llx\n"
+        "  submitted  0x%016llx\n"
+        "  after      0x%016llx\n",
+        clusterName(reply.cluster),
+        reply.requested_pstate,
+        static_cast<unsigned long long>(
+            reply.physical_address),
+        static_cast<unsigned long long>(
+            reply.command_before),
+        static_cast<unsigned long long>(
+            reply.command_submitted),
+        static_cast<unsigned long long>(
+            reply.command_after));
+
+    return 0;
+}
+
+static int
 restoreDefaults(io_connect_t connect)
 {
     kern_return_t kr =
@@ -407,11 +471,14 @@ usage(const char *argv0)
         "  %s status <ECPU0|PCPU0|PCPU1> [cluster ...]\n"
         "  %s read <ECPU0|PCPU0|PCPU1> "
         "<cmd|last_change|status|pll_status|pll_factor>\n"
+        "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
         "  %s restore-default\n"
         "  %s hold-default [milliseconds]\n"
         "\n"
         "status is metadata-only. read performs exactly one "
-        "64-bit MMIO access at the explicitly selected register.\n",
+        "64-bit MMIO load. set-pstate performs one explicit "
+        "read-modify-write transition on the selected cluster.\n",
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -489,6 +556,75 @@ main(int argc, char **argv)
                             cluster),
                         static_cast<unsigned>(
                             reg));
+            }
+        }
+    }
+
+    else if (std::strcmp(
+                 argv[1],
+                 "set-pstate") == 0) {
+
+        if (argc != 4) {
+            usage(argv[0]);
+            result = 2;
+        } else {
+            const int cluster =
+                clusterIndex(argv[2]);
+
+            char *end = nullptr;
+            const long parsed =
+                std::strtol(
+                    argv[3],
+                    &end,
+                    10);
+
+            if (cluster < 0 ||
+                !end ||
+                *end != '\0' ||
+                parsed < 1 ||
+                parsed > 31) {
+
+                usage(argv[0]);
+                result = 2;
+            } else {
+                const unsigned maxPState =
+                    cluster ==
+                        kMBUClusterECPU0
+                        ? 7U
+                        : 17U;
+
+                if (static_cast<unsigned>(
+                        parsed) > maxPState) {
+
+                    std::fprintf(
+                        stderr,
+                        "pstate out of known T6020 range: "
+                        "%s accepts 1..%u\n",
+                        clusterName(
+                            static_cast<unsigned>(
+                                cluster)),
+                        maxPState);
+
+                    result = 2;
+                } else {
+                    if (cluster !=
+                        kMBUClusterECPU0) {
+
+                        std::fprintf(
+                            stderr,
+                            "warning: P-cluster MMIO can panic if "
+                            "that cluster is power-gated; proceeding "
+                            "because you explicitly selected it.\n");
+                    }
+
+                    result =
+                        setPState(
+                            connect,
+                            static_cast<unsigned>(
+                                cluster),
+                            static_cast<unsigned>(
+                                parsed));
+                }
             }
         }
     }
