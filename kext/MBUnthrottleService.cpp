@@ -92,7 +92,7 @@ MBUnthrottleService::mapCluster(
         IOMemoryDescriptor::withPhysicalAddress(
             phys,
             kDVFSPageLength,
-            kIODirectionInOut);
+            kIODirectionIn);
 
     if (!cluster.descriptor) {
 
@@ -109,7 +109,8 @@ MBUnthrottleService::mapCluster(
     cluster.mapping =
         cluster.descriptor->map(
             kIOMapAnywhere |
-            kIOMapInhibitCache);
+            kIOMapInhibitCache |
+            kIOMapReadOnly);
 
     if (!cluster.mapping) {
 
@@ -332,28 +333,15 @@ MBUnthrottleService::start(
     }
 
     /*
-     * v3 established that ECPU0 and PCPU0 could be read before the
-     * first access to PCPU1 faulted with an LLC Bus Error at
-     * 0x212e20020. Map only the two clusters that were already
-     * successfully traversed. PCPU1 remains completely untouched.
+     * Do not map any cluster MMIO at startup. The CLI supplies an
+     * explicit cluster mask for each status request, and only those
+     * selected safe clusters are mapped/read on demand.
      */
-    for (uint32_t i = 0;
-         i <= kMBUClusterPCPU0;
-         ++i) {
-
-        if (!mapCluster(clusters_[i])) {
-            for (uint32_t j = 0; j < i; ++j)
-                unmapCluster(clusters_[j]);
-
-            return false;
-        }
-    }
-
     registerService();
 
     IOLog(
         "MBUnthrottle: started on T6020 "
-        "(partial MMIO: ECPU0+PCPU0 only; writes disabled)\n");
+        "(on-demand read-only MMIO; writes disabled)\n");
 
     return true;
 }
@@ -429,10 +417,26 @@ MBUnthrottleService::newUserClient(
 
 IOReturn
 MBUnthrottleService::copyStatus(
+    const MBUStatusRequest *request,
     MBUStatusReply *reply)
 {
-    if (!reply)
+    if (!request || !reply)
         return kIOReturnBadArgument;
+
+    const uint32_t mask =
+        request->cluster_mask;
+
+    if (mask == 0 ||
+        (mask & ~kMBUClusterMaskAll) != 0)
+        return kIOReturnBadArgument;
+
+    /*
+     * PCPU1 is a confirmed fatal target on this machine while that
+     * cluster is unavailable/power-gated. Never touch it from this
+     * diagnostic build, even if a malformed userspace client asks.
+     */
+    if ((mask & kMBUClusterMaskPCPU1) != 0)
+        return kIOReturnUnsupported;
 
     bzero(reply,
           sizeof(*reply));
@@ -444,14 +448,13 @@ MBUnthrottleService::copyStatus(
         kMBUClusterCount;
 
     reply->flags =
-        kMBUStatusFlagMMIOPartial |
         kMBUStatusFlagWritesDisabled;
 
     for (uint32_t i = 0;
          i < kMBUClusterCount;
          ++i) {
 
-        const ClusterMap &c =
+        ClusterMap &c =
             clusters_[i];
 
         auto &st =
@@ -468,27 +471,33 @@ MBUnthrottleService::copyStatus(
         st.default_pstate =
             c.defaultPState;
 
+        const uint32_t bit =
+            1U << i;
+
+        if ((mask & bit) == 0)
+            continue;
+
+        st.flags |=
+            kMBUClusterFlagSelected;
+
         if (i == kMBUClusterPCPU1) {
-            /*
-             * Never dereference PCPU1 in this build. The v3 panic
-             * identified its command register address as an
-             * unavailable fabric target.
-             */
             st.requested_pstate =
                 0xffffffffU;
-
-            st.flags =
+            st.flags |=
                 kMBUClusterFlagSkippedUnavailable;
-
             continue;
         }
 
-        if (!c.regs)
-            return kIOReturnNotReady;
+        if (!mapCluster(c))
+            return kIOReturnNoMemory;
 
-        st.flags =
+        st.flags |=
             kMBUClusterFlagMMIOMapped;
 
+        /*
+         * Read the selected cluster only. Keep the mapping lifetime
+         * tightly scoped to this one status request.
+         */
         st.raw_command =
             read64(
                 c,
@@ -521,6 +530,8 @@ MBUnthrottleService::copyStatus(
 
         st.flags |=
             kMBUClusterFlagMMIORead;
+
+        unmapCluster(c);
     }
 
     return kIOReturnSuccess;
