@@ -7,7 +7,7 @@ KERNEL_HEADERS := $(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers
 
 .PHONY: all cli kext clean verify-kext
 
-all: cli
+all: cli verify-kext
 
 cli:
 	@mkdir -p $(BUILD)
@@ -33,7 +33,7 @@ kext:
 		-I$(KERNEL_HEADERS) -Iinclude -Ikext \
 		-c kext/MBUnthrottleUserClient.cpp -o $(BUILD)/obj/userclient.o
 	$(CC) -x c -arch $(ARCH) -O2 \
-		-DKERNEL -D__KERNEL__ -mkernel -fapple-kext \
+		-DKERNEL -D__KERNEL__ -mkernel \
 		-fno-builtin -fno-common \
 		-I$(KERNEL_HEADERS) -Iinclude -Ikext \
 		-c kext/MBUnthrottle_info.c -o $(BUILD)/obj/kmod_info.o
