@@ -55,4 +55,9 @@ private:
         OSObject *target,
         void *reference,
         IOExternalMethodArguments *arguments);
+
+    static IOReturn sReadRegister(
+        OSObject *target,
+        void *reference,
+        IOExternalMethodArguments *arguments);
 };
