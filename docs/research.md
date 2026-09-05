@@ -186,6 +186,105 @@ from a downstream hardware limit.
 The answers determine whether the next experiment belongs at the DVFS-command
 layer or farther downstream in PMGR/PMP/SMC/throttle controls.
 
+## ApplePassthroughPPM / CPMS capture on the faulted-battery machine
+
+The macOS 26.6 / Darwin 25.6 T6020 system has
+`com.apple.driver.ApplePassthroughPPM` loaded and an active
+`ApplePassthroughPPM` service under the `ppm,passthrough` PMGR nub.
+
+The service reports:
+
+```text
+CPMSSupported = 1
+BaselineSystemCapability = (50000)
+SystemCapabilityFallbackPowersLow = (3500,3500,3500)
+EnableBatteryModelToSafeHarborFallback = 65536
+ForceBatteryModelFallback = 0
+UseOverrideClientPowerBudgets = 0
+UseOverrideSystemCapability = 0
+```
+
+It also exposes paired value/enable properties for battery-model inputs,
+including voltage, Qmax, depth-of-discharge, resistance, cutoff voltages,
+temperature, measured battery power and related inputs, for example:
+
+```text
+OverrideBatteryInputV
+UseOverrideBatteryInputV
+OverrideBatteryInputQmax
+UseOverrideBatteryInputQmax
+OverrideBatteryInputPsCutoffVoltage
+UseOverrideBatteryInputPsCutoffVoltage
+OverrideBatteryInputPuCutoffVoltage
+UseOverrideBatteryInputPuCutoffVoltage
+```
+
+This makes CPMS/PPM a substantially stronger candidate for the source of the
+faulted-battery package throttle than independently patching CPU DVFS.
+
+The PMGR `ppm` nub also contains:
+
+```text
+cpms-policy-type = 3
+cpms-batt2client = <binary mapping containing "package">
+cpms-dt-topology = <binary topology containing "droop" and "pulse_power.s">
+cpms-dt-curve = <binary package curves>
+btm-enabled = 1
+```
+
+The live IORegistry snapshot taken at idle reported:
+
+```text
+PPMVector:
+  BaselineSysCap  = 50000
+  ModeledSysCap   = 50000
+  ProactiveSysCap = 50000
+  NetSysCap       = 50000
+```
+
+Therefore the top-level system-capability value alone did not expose the
+observed throttle in that idle snapshot. The live CPMS control state and
+per-client budgets need to be queried directly.
+
+### CLPC package controls
+
+The T6020 AppleCLPC service has explicit package/client power controls,
+including:
+
+```text
+~pkg-avg-max-power = 9961472
+~pkg-lowpeak-max-power = 9961472
+~pkg-power-split-cpu-fraction = 29491
+~pkg-power-split-gpu-fraction = 29491
+~pkg-power-split-ane-fraction = 6553
+#pkg-avg-batt-power-target-tc = 1000
+#pkg-avg-therm-power-target-tc = 250
+```
+
+This confirms that the same package-level stack has CPU/GPU/ANE power-split
+concepts, which is why fixing the policy source is preferable to maintaining
+per-engine frequency overrides.
+
+### Read-only PPM probes
+
+The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
+
+```sh
+./build/mbu ppm-cpms
+./build/mbu ppm-client <client-id>
+```
+
+They use the reverse-engineered ApplePPMUserClient getters:
+
+```text
+selector 0x1e: CPMS control state, output buffer 0x28c0 bytes
+selector 0x1d: client state, one scalar client ID, output buffer 0x640 bytes
+```
+
+The client-state command also decodes the known detailed-budget array at
+offsets 0x1b8/0x1c0 and prints a compact non-zero hex dump for further
+reverse engineering.
+
 ## Licensing
 
 The Linux driver is GPL-2.0-only. This repository is GPL-2.0-only and keeps
