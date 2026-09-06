@@ -284,6 +284,48 @@ which only opens/closes candidate connection types and reports the result.
 Do not issue CPMS selectors on a nonzero type until the successful user-client
 type is identified and its ABI is verified.
 
+### peakpowermanagerd authorization and direct setProperties path
+
+On the target macOS 26.6 / Darwin 25.6 system, the live
+`ApplePPMUserClient` was created by `/usr/libexec/peakpowermanagerd`.
+
+The daemon carries both:
+
+```text
+com.apple.security.iokit-user-client-class = [ ApplePPMUserClient ]
+com.apple.private.ppm.superclient = true
+```
+
+Ordinary root processes do not have these Apple-private entitlements, which
+explains why scanning `IOServiceOpen(ApplePassthroughPPM, type=0..15)`
+returns `kIOReturnUnsupported` on this build.
+
+The exact Darwin 25.6 ApplePPMCPMS symbol set exposes:
+
+```text
+ApplePPMCPMS::setPropertiesGated(OSObject *)
+ApplePPMSystemCapabilityMonitor::setOverrideBatteryParameterScalar(uint32_t, int)
+ApplePPMSystemCapabilityMonitor::setOverrideBatteryParameterArray(uint32_t, OSArray *)
+BatteryOverrides::setOverride(uint32_t, int)
+ApplePPMSystemCapabilityMonitor::installBatteryDataOverride()
+```
+
+This indicates that the battery override IORegistry properties are connected
+to a real `setProperties()` control path, independent of the privileged
+`ApplePPMUserClient` external-method path.
+
+The CLI now includes a deliberately no-op reachability test:
+
+```sh
+sudo ./build/mbu ppm-setprops-probe
+```
+
+It first reads `UseOverrideBatteryInputV`, refuses to proceed unless the
+current value is exactly zero, then submits the same zero through
+`IORegistryEntrySetCFProperties()` and reads it back. It therefore tests
+whether root can reach `ApplePPMCPMS::setProperties()` without enabling or
+changing a battery override.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
