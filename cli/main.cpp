@@ -217,6 +217,179 @@ dumpNonZeroHex(const unsigned char *data,
     }
 }
 
+static bool
+copyUInt32Property(io_registry_entry_t entry,
+                   CFStringRef key,
+                   uint32_t *value)
+{
+    if (!value)
+        return false;
+
+    CFTypeRef property =
+        IORegistryEntryCreateCFProperty(
+            entry,
+            key,
+            kCFAllocatorDefault,
+            0);
+
+    if (!property)
+        return false;
+
+    bool ok = false;
+
+    if (CFGetTypeID(property) ==
+        CFNumberGetTypeID()) {
+
+        int64_t v = 0;
+
+        if (CFNumberGetValue(
+                static_cast<CFNumberRef>(
+                    property),
+                kCFNumberSInt64Type,
+                &v) &&
+            v >= 0 &&
+            v <= 0xffffffffLL) {
+
+            *value =
+                static_cast<uint32_t>(v);
+
+            ok = true;
+        }
+    }
+
+    CFRelease(property);
+
+    return ok;
+}
+
+static int
+ppmSetPropertiesProbe()
+{
+    io_service_t service =
+        IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching(
+                "ApplePassthroughPPM"));
+
+    if (!service) {
+        std::fprintf(
+            stderr,
+            "ApplePassthroughPPM not found\n");
+        return 1;
+    }
+
+    static const CFStringRef key =
+        CFSTR("UseOverrideBatteryInputV");
+
+    uint32_t before = 0;
+
+    if (!copyUInt32Property(
+            service,
+            key,
+            &before)) {
+
+        std::fprintf(
+            stderr,
+            "could not read UseOverrideBatteryInputV\n");
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    std::printf(
+        "UseOverrideBatteryInputV before=%u\n",
+        before);
+
+    if (before != 0) {
+        std::fprintf(
+            stderr,
+            "refusing probe because the current value is not 0; "
+            "this probe only re-submits an unchanged disabled override.\n");
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    CFMutableDictionaryRef properties =
+        CFDictionaryCreateMutable(
+            kCFAllocatorDefault,
+            0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+
+    if (!properties) {
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    int32_t zero = 0;
+
+    CFNumberRef zeroNumber =
+        CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberSInt32Type,
+            &zero);
+
+    if (!zeroNumber) {
+        CFRelease(properties);
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    CFDictionarySetValue(
+        properties,
+        key,
+        zeroNumber);
+
+    kern_return_t kr =
+        IORegistryEntrySetCFProperties(
+            service,
+            properties);
+
+    CFRelease(zeroNumber);
+    CFRelease(properties);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "IORegistryEntrySetCFProperties: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    uint32_t after = 0;
+
+    if (!copyUInt32Property(
+            service,
+            key,
+            &after)) {
+
+        std::fprintf(
+            stderr,
+            "setProperties succeeded but readback failed\n");
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    IOObjectRelease(service);
+
+    std::printf(
+        "setProperties returned success\n"
+        "UseOverrideBatteryInputV after=%u\n"
+        "no effective value change was requested\n",
+        after);
+
+    return after == 0 ? 0 : 1;
+}
+
 static int
 ppmOpenScan()
 {
@@ -815,6 +988,7 @@ usage(const char *argv0)
         "<cmd|last_change|status|pll_status|pll_factor>\n"
         "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
         "  %s hold-pstate <ECPU0|PCPU0|PCPU1> <pstate> [milliseconds]\n"
+        "  %s ppm-setprops-probe\n"
         "  %s ppm-open-scan\n"
         "  %s ppm-cpms\n"
         "  %s ppm-client <client-id>\n"
@@ -834,6 +1008,7 @@ usage(const char *argv0)
         argv0,
         argv0,
         argv0,
+        argv0,
         argv0);
 }
 
@@ -843,6 +1018,18 @@ main(int argc, char **argv)
     if (argc < 2) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-setprops-probe") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmSetPropertiesProbe();
     }
 
     if (std::strcmp(
