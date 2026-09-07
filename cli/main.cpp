@@ -390,6 +390,422 @@ ppmSetPropertiesProbe()
     return after == 0 ? 0 : 1;
 }
 
+static bool
+copyUInt32ArrayProperty(io_registry_entry_t entry,
+                        CFStringRef key,
+                        uint32_t *values,
+                        size_t capacity,
+                        size_t *count)
+{
+    if (!values || !count || capacity == 0)
+        return false;
+
+    *count = 0;
+
+    CFTypeRef property =
+        IORegistryEntryCreateCFProperty(
+            entry,
+            key,
+            kCFAllocatorDefault,
+            0);
+
+    if (!property)
+        return false;
+
+    bool ok = false;
+
+    if (CFGetTypeID(property) ==
+        CFArrayGetTypeID()) {
+
+        CFArrayRef array =
+            static_cast<CFArrayRef>(property);
+
+        const CFIndex n =
+            CFArrayGetCount(array);
+
+        if (n >= 0 &&
+            static_cast<size_t>(n) <= capacity) {
+
+            ok = true;
+
+            for (CFIndex i = 0;
+                 i < n;
+                 ++i) {
+
+                CFTypeRef item =
+                    CFArrayGetValueAtIndex(
+                        array,
+                        i);
+
+                if (!item ||
+                    CFGetTypeID(item) !=
+                        CFNumberGetTypeID()) {
+
+                    ok = false;
+                    break;
+                }
+
+                int64_t v = 0;
+
+                if (!CFNumberGetValue(
+                        static_cast<CFNumberRef>(
+                            item),
+                        kCFNumberSInt64Type,
+                        &v) ||
+                    v < 0 ||
+                    v > 0xffffffffLL) {
+
+                    ok = false;
+                    break;
+                }
+
+                values[i] =
+                    static_cast<uint32_t>(v);
+            }
+
+            if (ok)
+                *count =
+                    static_cast<size_t>(n);
+        }
+    }
+
+    CFRelease(property);
+
+    return ok;
+}
+
+static void
+printUInt32Array(const uint32_t *values,
+                 size_t count)
+{
+    std::printf("(");
+
+    for (size_t i = 0;
+         i < count;
+         ++i) {
+
+        if (i)
+            std::printf(",");
+
+        std::printf(
+            "%u",
+            values[i]);
+    }
+
+    std::printf(")");
+}
+
+static io_service_t
+openPPMService()
+{
+    io_service_t service =
+        IOServiceGetMatchingService(
+            kIOMainPortDefault,
+            IOServiceMatching(
+                "ApplePassthroughPPM"));
+
+    if (!service) {
+        std::fprintf(
+            stderr,
+            "ApplePassthroughPPM not found\n");
+    }
+
+    return service;
+}
+
+static int
+ppmSyscapStatus()
+{
+    io_service_t service =
+        openPPMService();
+
+    if (!service)
+        return 1;
+
+    uint32_t useOverride = 0;
+
+    uint32_t baseline[8]{};
+    size_t baselineCount = 0;
+
+    uint32_t overrideValues[8]{};
+    size_t overrideCount = 0;
+
+    const bool gotUse =
+        copyUInt32Property(
+            service,
+            CFSTR("UseOverrideSystemCapability"),
+            &useOverride);
+
+    const bool gotBaseline =
+        copyUInt32ArrayProperty(
+            service,
+            CFSTR("BaselineSystemCapability"),
+            baseline,
+            8,
+            &baselineCount);
+
+    const bool gotOverride =
+        copyUInt32ArrayProperty(
+            service,
+            CFSTR("OverrideSystemCapability"),
+            overrideValues,
+            8,
+            &overrideCount);
+
+    IOObjectRelease(service);
+
+    if (!gotUse ||
+        !gotBaseline ||
+        !gotOverride) {
+
+        std::fprintf(
+            stderr,
+            "failed to read one or more system-capability properties\n");
+
+        return 1;
+    }
+
+    std::printf(
+        "UseOverrideSystemCapability=%u\n"
+        "BaselineSystemCapability=",
+        useOverride);
+
+    printUInt32Array(
+        baseline,
+        baselineCount);
+
+    std::printf(
+        "\nOverrideSystemCapability=");
+
+    printUInt32Array(
+        overrideValues,
+        overrideCount);
+
+    std::printf("\n");
+
+    return 0;
+}
+
+static CFMutableArrayRef
+makeUInt32Array(uint32_t value,
+                size_t count)
+{
+    CFMutableArrayRef array =
+        CFArrayCreateMutable(
+            kCFAllocatorDefault,
+            static_cast<CFIndex>(count),
+            &kCFTypeArrayCallBacks);
+
+    if (!array)
+        return nullptr;
+
+    for (size_t i = 0;
+         i < count;
+         ++i) {
+
+        int32_t signedValue =
+            static_cast<int32_t>(value);
+
+        CFNumberRef number =
+            CFNumberCreate(
+                kCFAllocatorDefault,
+                kCFNumberSInt32Type,
+                &signedValue);
+
+        if (!number) {
+            CFRelease(array);
+            return nullptr;
+        }
+
+        CFArrayAppendValue(
+            array,
+            number);
+
+        CFRelease(number);
+    }
+
+    return array;
+}
+
+static int
+ppmSetSyscap(uint32_t value)
+{
+    io_service_t service =
+        openPPMService();
+
+    if (!service)
+        return 1;
+
+    uint32_t useOverride = 0;
+
+    if (!copyUInt32Property(
+            service,
+            CFSTR("UseOverrideSystemCapability"),
+            &useOverride)) {
+
+        std::fprintf(
+            stderr,
+            "could not read UseOverrideSystemCapability\n");
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    if (useOverride != 0) {
+        std::fprintf(
+            stderr,
+            "refusing to replace an already-active system-capability override; "
+            "clear it first\n");
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    CFMutableDictionaryRef properties =
+        CFDictionaryCreateMutable(
+            kCFAllocatorDefault,
+            0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+
+    CFMutableArrayRef values =
+        makeUInt32Array(
+            value,
+            3);
+
+    int32_t one = 1;
+
+    CFNumberRef enable =
+        CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberSInt32Type,
+            &one);
+
+    if (!properties ||
+        !values ||
+        !enable) {
+
+        if (enable)
+            CFRelease(enable);
+
+        if (values)
+            CFRelease(values);
+
+        if (properties)
+            CFRelease(properties);
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    CFDictionarySetValue(
+        properties,
+        CFSTR("OverrideSystemCapability"),
+        values);
+
+    CFDictionarySetValue(
+        properties,
+        CFSTR("UseOverrideSystemCapability"),
+        enable);
+
+    kern_return_t kr =
+        IORegistryEntrySetCFProperties(
+            service,
+            properties);
+
+    CFRelease(enable);
+    CFRelease(values);
+    CFRelease(properties);
+    IOObjectRelease(service);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "IORegistryEntrySetCFProperties: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+
+        return 1;
+    }
+
+    std::printf(
+        "requested system-capability override %u mW on all 3 entries\n",
+        value);
+
+    return ppmSyscapStatus();
+}
+
+static int
+ppmClearSyscap()
+{
+    io_service_t service =
+        openPPMService();
+
+    if (!service)
+        return 1;
+
+    CFMutableDictionaryRef properties =
+        CFDictionaryCreateMutable(
+            kCFAllocatorDefault,
+            0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+
+    int32_t zero = 0;
+
+    CFNumberRef disable =
+        CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberSInt32Type,
+            &zero);
+
+    if (!properties ||
+        !disable) {
+
+        if (disable)
+            CFRelease(disable);
+
+        if (properties)
+            CFRelease(properties);
+
+        IOObjectRelease(service);
+
+        return 1;
+    }
+
+    CFDictionarySetValue(
+        properties,
+        CFSTR("UseOverrideSystemCapability"),
+        disable);
+
+    kern_return_t kr =
+        IORegistryEntrySetCFProperties(
+            service,
+            properties);
+
+    CFRelease(disable);
+    CFRelease(properties);
+    IOObjectRelease(service);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "IORegistryEntrySetCFProperties: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+
+        return 1;
+    }
+
+    std::printf(
+        "cleared system-capability override\n");
+
+    return ppmSyscapStatus();
+}
+
 static int
 ppmOpenScan()
 {
@@ -989,6 +1405,9 @@ usage(const char *argv0)
         "  %s set-pstate <ECPU0|PCPU0|PCPU1> <pstate>\n"
         "  %s hold-pstate <ECPU0|PCPU0|PCPU1> <pstate> [milliseconds]\n"
         "  %s ppm-setprops-probe\n"
+        "  %s ppm-syscap-status\n"
+        "  %s ppm-syscap <mW>\n"
+        "  %s ppm-syscap-clear\n"
         "  %s ppm-open-scan\n"
         "  %s ppm-cpms\n"
         "  %s ppm-client <client-id>\n"
@@ -1009,6 +1428,9 @@ usage(const char *argv0)
         argv0,
         argv0,
         argv0,
+        argv0,
+        argv0,
+        argv0,
         argv0);
 }
 
@@ -1018,6 +1440,64 @@ main(int argc, char **argv)
     if (argc < 2) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-syscap-status") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmSyscapStatus();
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-syscap") == 0) {
+
+        if (argc != 3) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        char *end = nullptr;
+
+        const unsigned long parsed =
+            std::strtoul(
+                argv[2],
+                &end,
+                0);
+
+        if (!end ||
+            *end != '\0' ||
+            parsed < 1000 ||
+            parsed > 100000) {
+
+            std::fprintf(
+                stderr,
+                "system capability must be 1000..100000 mW\n");
+
+            return 2;
+        }
+
+        return ppmSetSyscap(
+            static_cast<uint32_t>(
+                parsed));
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-syscap-clear") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmClearSyscap();
     }
 
     if (std::strcmp(
