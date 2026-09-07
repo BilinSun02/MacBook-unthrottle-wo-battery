@@ -352,6 +352,46 @@ This path is preferable to fabricated voltage/Qmax values for the first active
 test because it overrides the computed system-capability input directly while
 leaving downstream client/thermal machinery in place.
 
+### System-capability override result
+
+On the target machine, the initial live value of:
+
+```text
+OverrideSystemCapability
+```
+
+was:
+
+```text
+(2147483647,2147483647,2147483647)
+```
+
+while `UseOverrideSystemCapability=0`.
+
+Setting:
+
+```text
+OverrideSystemCapability=(50000,50000,50000)
+UseOverrideSystemCapability=1
+```
+
+persisted successfully, but sustained CPU load still left the P clusters
+mostly in the previously observed ~1704/1968 MHz range.
+
+This is a negative result for the top-level system-capability override as the
+source of the CPU throttle. The original INT32_MAX values are consistent with
+an effectively unbounded/unset override slot rather than a hidden low cap.
+Therefore 50000 mW should not be treated as an "uncap" value.
+
+Future tests should clear this override before establishing a baseline:
+
+```sh
+sudo ./build/mbu ppm-syscap-clear
+```
+
+The next investigation should focus on battery Pmax, predictive Pmax,
+per-client requested/granted budgets, and detailed thermal budgets.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
