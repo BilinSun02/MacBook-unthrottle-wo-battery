@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dlfcn.h>
 #include <unistd.h>
 
 #include "../include/MBUProtocol.h"
@@ -806,6 +807,489 @@ ppmClearSyscap()
     return ppmSyscapStatus();
 }
 
+typedef struct IOReportSubscriptionRefStruct *
+    IOReportSubscriptionRef;
+
+struct IOReportAPI {
+    void *handle = nullptr;
+
+    CFDictionaryRef (*copyChannelsInGroup)(
+        CFStringRef,
+        CFStringRef,
+        uint64_t,
+        uint64_t,
+        uint64_t) = nullptr;
+
+    IOReportSubscriptionRef (*createSubscription)(
+        void *,
+        CFMutableDictionaryRef,
+        CFMutableDictionaryRef *,
+        uint64_t,
+        CFTypeRef) = nullptr;
+
+    CFDictionaryRef (*createSamples)(
+        IOReportSubscriptionRef,
+        CFMutableDictionaryRef,
+        CFTypeRef) = nullptr;
+
+    CFDictionaryRef (*createSamplesDelta)(
+        CFDictionaryRef,
+        CFDictionaryRef,
+        CFTypeRef) = nullptr;
+
+    CFStringRef (*channelGetGroup)(
+        CFDictionaryRef) = nullptr;
+
+    CFStringRef (*channelGetSubGroup)(
+        CFDictionaryRef) = nullptr;
+
+    CFStringRef (*channelGetChannelName)(
+        CFDictionaryRef) = nullptr;
+
+    CFStringRef (*channelGetUnitLabel)(
+        CFDictionaryRef) = nullptr;
+
+    int32_t (*channelGetFormat)(
+        CFDictionaryRef) = nullptr;
+
+    int64_t (*simpleGetIntegerValue)(
+        CFDictionaryRef,
+        int32_t) = nullptr;
+
+    int32_t (*stateGetCount)(
+        CFDictionaryRef) = nullptr;
+
+    CFStringRef (*stateGetNameForIndex)(
+        CFDictionaryRef,
+        int32_t) = nullptr;
+
+    int64_t (*stateGetResidency)(
+        CFDictionaryRef,
+        int32_t) = nullptr;
+};
+
+template <typename T>
+static bool
+loadIOReportSymbol(void *handle,
+                   const char *name,
+                   T *out)
+{
+    if (!handle ||
+        !name ||
+        !out)
+        return false;
+
+    void *symbol =
+        dlsym(
+            handle,
+            name);
+
+    if (!symbol)
+        return false;
+
+    *out =
+        reinterpret_cast<T>(symbol);
+
+    return true;
+}
+
+static bool
+loadIOReport(IOReportAPI *api)
+{
+    if (!api)
+        return false;
+
+    api->handle =
+        dlopen(
+            "/usr/lib/libIOReport.dylib",
+            RTLD_LAZY | RTLD_LOCAL);
+
+    if (!api->handle) {
+        api->handle =
+            dlopen(
+                "/System/Library/PrivateFrameworks/IOReport.framework/IOReport",
+                RTLD_LAZY | RTLD_LOCAL);
+    }
+
+    if (!api->handle) {
+        std::fprintf(
+            stderr,
+            "could not load IOReport: %s\n",
+            dlerror());
+
+        return false;
+    }
+
+#define LOAD_IOREPORT(member, symbolName) \
+    do { \
+        if (!loadIOReportSymbol( \
+                api->handle, \
+                symbolName, \
+                &api->member)) { \
+            std::fprintf( \
+                stderr, \
+                "missing IOReport symbol: %s\n", \
+                symbolName); \
+            dlclose(api->handle); \
+            api->handle = nullptr; \
+            return false; \
+        } \
+    } while (0)
+
+    LOAD_IOREPORT(
+        copyChannelsInGroup,
+        "IOReportCopyChannelsInGroup");
+
+    LOAD_IOREPORT(
+        createSubscription,
+        "IOReportCreateSubscription");
+
+    LOAD_IOREPORT(
+        createSamples,
+        "IOReportCreateSamples");
+
+    LOAD_IOREPORT(
+        createSamplesDelta,
+        "IOReportCreateSamplesDelta");
+
+    LOAD_IOREPORT(
+        channelGetGroup,
+        "IOReportChannelGetGroup");
+
+    LOAD_IOREPORT(
+        channelGetSubGroup,
+        "IOReportChannelGetSubGroup");
+
+    LOAD_IOREPORT(
+        channelGetChannelName,
+        "IOReportChannelGetChannelName");
+
+    LOAD_IOREPORT(
+        channelGetUnitLabel,
+        "IOReportChannelGetUnitLabel");
+
+    LOAD_IOREPORT(
+        channelGetFormat,
+        "IOReportChannelGetFormat");
+
+    LOAD_IOREPORT(
+        simpleGetIntegerValue,
+        "IOReportSimpleGetIntegerValue");
+
+    LOAD_IOREPORT(
+        stateGetCount,
+        "IOReportStateGetCount");
+
+    LOAD_IOREPORT(
+        stateGetNameForIndex,
+        "IOReportStateGetNameForIndex");
+
+    LOAD_IOREPORT(
+        stateGetResidency,
+        "IOReportStateGetResidency");
+
+#undef LOAD_IOREPORT
+
+    return true;
+}
+
+static void
+cfStringToCString(CFStringRef string,
+                  char *buffer,
+                  size_t capacity)
+{
+    if (!buffer ||
+        capacity == 0)
+        return;
+
+    buffer[0] = '\0';
+
+    if (!string)
+        return;
+
+    CFStringGetCString(
+        string,
+        buffer,
+        static_cast<CFIndex>(
+            capacity),
+        kCFStringEncodingUTF8);
+}
+
+static int
+ppmIOReport(unsigned intervalMs)
+{
+    IOReportAPI api{};
+
+    if (!loadIOReport(&api))
+        return 1;
+
+    CFDictionaryRef copied =
+        api.copyChannelsInGroup(
+            CFSTR("PPM Stats"),
+            nullptr,
+            0,
+            0,
+            0);
+
+    if (!copied) {
+        std::fprintf(
+            stderr,
+            "IOReportCopyChannelsInGroup(\"PPM Stats\") returned null\n");
+
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    const CFIndex copiedCount =
+        CFDictionaryGetCount(copied);
+
+    CFMutableDictionaryRef channels =
+        CFDictionaryCreateMutableCopy(
+            kCFAllocatorDefault,
+            copiedCount,
+            copied);
+
+    CFRelease(copied);
+
+    if (!channels) {
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFMutableDictionaryRef subscribed =
+        nullptr;
+
+    IOReportSubscriptionRef subscription =
+        api.createSubscription(
+            nullptr,
+            channels,
+            &subscribed,
+            0,
+            nullptr);
+
+    if (!subscription) {
+        std::fprintf(
+            stderr,
+            "IOReportCreateSubscription failed\n");
+
+        if (subscribed)
+            CFRelease(subscribed);
+
+        CFRelease(channels);
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    if (subscribed)
+        CFRelease(subscribed);
+
+    CFDictionaryRef first =
+        api.createSamples(
+            subscription,
+            channels,
+            nullptr);
+
+    if (!first) {
+        std::fprintf(
+            stderr,
+            "first IOReport sample failed\n");
+
+        CFRelease(channels);
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    usleep(
+        intervalMs * 1000U);
+
+    CFDictionaryRef second =
+        api.createSamples(
+            subscription,
+            channels,
+            nullptr);
+
+    if (!second) {
+        std::fprintf(
+            stderr,
+            "second IOReport sample failed\n");
+
+        CFRelease(first);
+        CFRelease(channels);
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    CFDictionaryRef delta =
+        api.createSamplesDelta(
+            first,
+            second,
+            nullptr);
+
+    CFRelease(first);
+    CFRelease(second);
+
+    if (!delta) {
+        std::fprintf(
+            stderr,
+            "IOReportCreateSamplesDelta failed\n");
+
+        CFRelease(channels);
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    CFTypeRef arrayObject =
+        CFDictionaryGetValue(
+            delta,
+            CFSTR("IOReportChannels"));
+
+    if (!arrayObject ||
+        CFGetTypeID(arrayObject) !=
+            CFArrayGetTypeID()) {
+
+        std::fprintf(
+            stderr,
+            "PPM Stats delta has no IOReportChannels array\n");
+
+        CFRelease(delta);
+        CFRelease(channels);
+        dlclose(api.handle);
+
+        return 1;
+    }
+
+    CFArrayRef array =
+        static_cast<CFArrayRef>(
+            arrayObject);
+
+    const CFIndex count =
+        CFArrayGetCount(array);
+
+    std::printf(
+        "PPM Stats over %u ms: %ld channels\n",
+        intervalMs,
+        static_cast<long>(
+            count));
+
+    for (CFIndex i = 0;
+         i < count;
+         ++i) {
+
+        CFTypeRef itemObject =
+            CFArrayGetValueAtIndex(
+                array,
+                i);
+
+        if (!itemObject ||
+            CFGetTypeID(itemObject) !=
+                CFDictionaryGetTypeID())
+            continue;
+
+        CFDictionaryRef item =
+            static_cast<CFDictionaryRef>(
+                itemObject);
+
+        char group[128]{};
+        char subgroup[128]{};
+        char name[128]{};
+        char unit[64]{};
+
+        cfStringToCString(
+            api.channelGetGroup(item),
+            group,
+            sizeof(group));
+
+        cfStringToCString(
+            api.channelGetSubGroup(item),
+            subgroup,
+            sizeof(subgroup));
+
+        cfStringToCString(
+            api.channelGetChannelName(item),
+            name,
+            sizeof(name));
+
+        cfStringToCString(
+            api.channelGetUnitLabel(item),
+            unit,
+            sizeof(unit));
+
+        const int32_t format =
+            api.channelGetFormat(item);
+
+        std::printf(
+            "[%s] [%s] %s format=%d",
+            group,
+            subgroup,
+            name,
+            format);
+
+        if (format == 1) {
+            const int64_t value =
+                api.simpleGetIntegerValue(
+                    item,
+                    0);
+
+            std::printf(
+                " value=%lld",
+                static_cast<long long>(
+                    value));
+
+            if (unit[0] != '\0')
+                std::printf(
+                    " unit=%s",
+                    unit);
+        }
+
+        else if (format == 2) {
+            const int32_t stateCount =
+                api.stateGetCount(item);
+
+            std::printf(
+                " states=%d",
+                stateCount);
+
+            for (int32_t state = 0;
+                 state < stateCount;
+                 ++state) {
+
+                char stateName[128]{};
+
+                cfStringToCString(
+                    api.stateGetNameForIndex(
+                        item,
+                        state),
+                    stateName,
+                    sizeof(stateName));
+
+                const int64_t residency =
+                    api.stateGetResidency(
+                        item,
+                        state);
+
+                std::printf(
+                    " {%s=%lld}",
+                    stateName,
+                    static_cast<long long>(
+                        residency));
+            }
+        }
+
+        std::printf("\n");
+    }
+
+    CFRelease(delta);
+    CFRelease(channels);
+    dlclose(api.handle);
+
+    return 0;
+}
+
 static int
 ppmOpenScan()
 {
@@ -1408,6 +1892,7 @@ usage(const char *argv0)
         "  %s ppm-syscap-status\n"
         "  %s ppm-syscap <mW>\n"
         "  %s ppm-syscap-clear\n"
+        "  %s ppm-ioreport [milliseconds]\n"
         "  %s ppm-open-scan\n"
         "  %s ppm-cpms\n"
         "  %s ppm-client <client-id>\n"
@@ -1431,6 +1916,7 @@ usage(const char *argv0)
         argv0,
         argv0,
         argv0,
+        argv0,
         argv0);
 }
 
@@ -1440,6 +1926,50 @@ main(int argc, char **argv)
     if (argc < 2) {
         usage(argv[0]);
         return 2;
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-ioreport") == 0) {
+
+        if (argc < 2 ||
+            argc > 3) {
+
+            usage(argv[0]);
+            return 2;
+        }
+
+        unsigned intervalMs =
+            1000;
+
+        if (argc == 3) {
+            char *end = nullptr;
+
+            const unsigned long parsed =
+                std::strtoul(
+                    argv[2],
+                    &end,
+                    0);
+
+            if (!end ||
+                *end != '\0' ||
+                parsed < 10 ||
+                parsed > 60000) {
+
+                std::fprintf(
+                    stderr,
+                    "IOReport interval must be 10..60000 ms\n");
+
+                return 2;
+            }
+
+            intervalMs =
+                static_cast<unsigned>(
+                    parsed);
+        }
+
+        return ppmIOReport(
+            intervalMs);
     }
 
     if (std::strcmp(
