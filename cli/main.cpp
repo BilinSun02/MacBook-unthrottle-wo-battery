@@ -1327,11 +1327,21 @@ ppmIOReport(unsigned intervalMs)
                         item,
                         state);
 
-                std::printf(
-                    " {%s=%lld}",
-                    stateName,
-                    static_cast<long long>(
-                        residency));
+                if (stateName[0] != '\0') {
+                    std::printf(
+                        " {%s=%lld}",
+                        stateName,
+                        static_cast<long long>(
+                            residency));
+                }
+
+                else {
+                    std::printf(
+                        " {state%d=%lld}",
+                        state,
+                        static_cast<long long>(
+                            residency));
+                }
             }
         }
 
