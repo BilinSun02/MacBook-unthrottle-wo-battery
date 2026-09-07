@@ -428,6 +428,39 @@ control-effort lane or client is engaging.
 `OverrideSystemCapability=(2147483647,2147483647,2147483647)` sentinel
 triplet while disabling the override flag.
 
+### CPMS IOReport load comparison
+
+Idle, sustained CPU load, and GPU load all showed the same pattern in the
+group-wide PPM Stats sampler:
+
+- Droop Controller utilization/control effort: entirely in 0%.
+- CPMS Power Reduction (instantaneous, 100 ms, 1 s): entirely in 0%.
+- CPMS Ferocity (instantaneous, 100 ms, 1 s): entirely in 0%.
+- Policy CPMS ServoCE0: entirely in 0%.
+- CPMS Lanes engagement: entirely in state 0.
+
+The state-residency deltas scale correctly with the requested sample
+duration (~72 million ticks for 3 s, ~120 million for 5 s, roughly a 24 MHz
+timebase), so this is not consistent with a frozen or non-delta sample.
+
+This argues against the observed bad-battery throttle being produced by a
+dynamic CPMS reduction / droop / servo loop that ramps under workload. A
+pre-selected low budget, battery-Pmax state, client budget index, or another
+lower-level policy remains plausible.
+
+The original IOReport legend also contains subgroup-specific state channels:
+
+```text
+Client2  -> BgtIdx02
+Client5  -> BgtIdx05
+Client6  -> BgtIdx06
+```
+
+The group-wide `IOReportCopyChannelsInGroup("PPM Stats", NULL, ...)` query
+did not return those client channels. The CLI now explicitly queries and
+merges the Client2/5/6 subgroups. Unnamed states are printed as
+`state0`, `state1`, etc.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
