@@ -326,6 +326,32 @@ current value is exactly zero, then submits the same zero through
 whether root can reach `ApplePPMCPMS::setProperties()` without enabling or
 changing a battery override.
 
+### Reversible system-capability override
+
+The root `IORegistryEntrySetCFProperties()` path is reachable on the target
+machine. A no-op write of `UseOverrideBatteryInputV=0` returned success and
+read back as zero.
+
+The CLI therefore includes a reversible CPMS system-capability experiment:
+
+```sh
+sudo ./build/mbu ppm-syscap-status
+sudo ./build/mbu ppm-syscap 50000
+sudo ./build/mbu ppm-syscap-clear
+```
+
+`ppm-syscap` refuses to replace an already-active override. It sets
+`OverrideSystemCapability` to the requested value on all three entries and
+then sets `UseOverrideSystemCapability=1`. The first test value, 50000 mW,
+comes from the target's own `BaselineSystemCapability=(50000)`.
+
+`ppm-syscap-clear` only disables `UseOverrideSystemCapability`; the stored
+override array may remain visible but is inert while the enable flag is zero.
+
+This path is preferable to fabricated voltage/Qmax values for the first active
+test because it overrides the computed system-capability input directly while
+leaving downstream client/thermal machinery in place.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
