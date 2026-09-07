@@ -1453,6 +1453,217 @@ ppmIOReport(unsigned intervalMs)
                 subgroupName);
         }
 
+        CFMutableDictionaryRef desired =
+            CFDictionaryCreateMutableCopy(
+                kCFAllocatorDefault,
+                0,
+                probe);
+
+        CFMutableDictionaryRef subbed =
+            nullptr;
+
+        IOReportSubscriptionRef clientSubscription =
+            desired
+                ? api.createSubscription(
+                    nullptr,
+                    desired,
+                    &subbed,
+                    0,
+                    nullptr)
+                : nullptr;
+
+        if (!clientSubscription) {
+            std::printf(
+                "IOReport client-only subscription %s: failed\n",
+                subgroupName);
+        }
+
+        else {
+            CFMutableDictionaryRef sampleSet =
+                subbed
+                    ? subbed
+                    : desired;
+
+            CFTypeRef sampleSetObject =
+                CFDictionaryGetValue(
+                    sampleSet,
+                    CFSTR("IOReportChannels"));
+
+            CFIndex sampleSetCount = 0;
+
+            if (sampleSetObject &&
+                CFGetTypeID(sampleSetObject) ==
+                    CFArrayGetTypeID()) {
+
+                sampleSetCount =
+                    CFArrayGetCount(
+                        static_cast<CFArrayRef>(
+                            sampleSetObject));
+            }
+
+            std::printf(
+                "IOReport client-only subscription %s: %ld descriptors\n",
+                subgroupName,
+                static_cast<long>(
+                    sampleSetCount));
+
+            CFDictionaryRef clientFirst =
+                api.createSamples(
+                    clientSubscription,
+                    sampleSet,
+                    nullptr);
+
+            usleep(250000);
+
+            CFDictionaryRef clientSecond =
+                api.createSamples(
+                    clientSubscription,
+                    sampleSet,
+                    nullptr);
+
+            CFDictionaryRef clientDelta =
+                clientFirst && clientSecond
+                    ? api.createSamplesDelta(
+                        clientFirst,
+                        clientSecond,
+                        nullptr)
+                    : nullptr;
+
+            if (clientFirst)
+                CFRelease(clientFirst);
+
+            if (clientSecond)
+                CFRelease(clientSecond);
+
+            if (!clientDelta) {
+                std::printf(
+                    "IOReport client-only sample %s: failed\n",
+                    subgroupName);
+            }
+
+            else {
+                CFTypeRef clientArrayObject =
+                    CFDictionaryGetValue(
+                        clientDelta,
+                        CFSTR("IOReportChannels"));
+
+                CFIndex clientCount = 0;
+
+                if (clientArrayObject &&
+                    CFGetTypeID(clientArrayObject) ==
+                        CFArrayGetTypeID()) {
+
+                    CFArrayRef clientArray =
+                        static_cast<CFArrayRef>(
+                            clientArrayObject);
+
+                    clientCount =
+                        CFArrayGetCount(
+                            clientArray);
+
+                    std::printf(
+                        "IOReport client-only delta %s: %ld channels\n",
+                        subgroupName,
+                        static_cast<long>(
+                            clientCount));
+
+                    for (CFIndex j = 0;
+                         j < clientCount;
+                         ++j) {
+
+                        CFTypeRef itemObject =
+                            CFArrayGetValueAtIndex(
+                                clientArray,
+                                j);
+
+                        if (!itemObject ||
+                            CFGetTypeID(itemObject) !=
+                                CFDictionaryGetTypeID())
+                            continue;
+
+                        CFDictionaryRef item =
+                            static_cast<CFDictionaryRef>(
+                                itemObject);
+
+                        char name[128]{};
+
+                        cfStringToCString(
+                            api.channelGetChannelName(item),
+                            name,
+                            sizeof(name));
+
+                        const int32_t format =
+                            api.channelGetFormat(item);
+
+                        std::printf(
+                            "  %s format=%d",
+                            name,
+                            format);
+
+                        if (format == 2) {
+                            const int32_t nstates =
+                                api.stateGetCount(item);
+
+                            std::printf(
+                                " states=%d",
+                                nstates);
+
+                            for (int32_t state = 0;
+                                 state < nstates;
+                                 ++state) {
+
+                                char stateName[128]{};
+
+                                cfStringToCString(
+                                    api.stateGetNameForIndex(
+                                        item,
+                                        state),
+                                    stateName,
+                                    sizeof(stateName));
+
+                                const int64_t residency =
+                                    api.stateGetResidency(
+                                        item,
+                                        state);
+
+                                if (stateName[0] != '\0') {
+                                    std::printf(
+                                        " {%s=%lld}",
+                                        stateName,
+                                        static_cast<long long>(
+                                            residency));
+                                }
+
+                                else {
+                                    std::printf(
+                                        " {state%d=%lld}",
+                                        state,
+                                        static_cast<long long>(
+                                            residency));
+                                }
+                            }
+                        }
+
+                        std::printf("\n");
+                    }
+                }
+
+                else {
+                    std::printf(
+                        "IOReport client-only delta %s: no channels array\n",
+                        subgroupName);
+                }
+
+                CFRelease(clientDelta);
+            }
+        }
+
+        if (subbed)
+            CFRelease(subbed);
+
+        if (desired)
+            CFRelease(desired);
+
         CFRelease(probe);
     }
 
