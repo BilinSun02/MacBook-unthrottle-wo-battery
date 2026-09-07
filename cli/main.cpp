@@ -678,6 +678,148 @@ ppmSetBaseline(uint32_t value)
     return after == value ? 0 : 1;
 }
 
+static int
+ppmClientBudgetsStatus()
+{
+    io_service_t service =
+        openPPMService();
+
+    if (!service)
+        return 1;
+
+    uint32_t value = 0;
+
+    const bool ok =
+        copyUInt32Property(
+            service,
+            CFSTR("UseOverrideClientPowerBudgets"),
+            &value);
+
+    IOObjectRelease(service);
+
+    if (!ok) {
+        std::fprintf(
+            stderr,
+            "could not read UseOverrideClientPowerBudgets\n");
+        return 1;
+    }
+
+    std::printf(
+        "UseOverrideClientPowerBudgets=%u\n",
+        value);
+
+    return 0;
+}
+
+static int
+ppmSetClientBudgets(uint32_t value)
+{
+    if (value > 1) {
+        std::fprintf(
+            stderr,
+            "client-budget override value must be 0 or 1\n");
+        return 2;
+    }
+
+    io_service_t service =
+        openPPMService();
+
+    if (!service)
+        return 1;
+
+    uint32_t before = 0;
+
+    if (!copyUInt32Property(
+            service,
+            CFSTR("UseOverrideClientPowerBudgets"),
+            &before)) {
+
+        std::fprintf(
+            stderr,
+            "could not read UseOverrideClientPowerBudgets\n");
+
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    CFMutableDictionaryRef properties =
+        CFDictionaryCreateMutable(
+            kCFAllocatorDefault,
+            0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+
+    int32_t signedValue =
+        static_cast<int32_t>(value);
+
+    CFNumberRef number =
+        CFNumberCreate(
+            kCFAllocatorDefault,
+            kCFNumberSInt32Type,
+            &signedValue);
+
+    if (!properties ||
+        !number) {
+
+        if (number)
+            CFRelease(number);
+
+        if (properties)
+            CFRelease(properties);
+
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    CFDictionarySetValue(
+        properties,
+        CFSTR("UseOverrideClientPowerBudgets"),
+        number);
+
+    kern_return_t kr =
+        IORegistryEntrySetCFProperties(
+            service,
+            properties);
+
+    CFRelease(number);
+    CFRelease(properties);
+
+    if (kr != KERN_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "IORegistryEntrySetCFProperties: %s (0x%x)\n",
+            mach_error_string(kr),
+            kr);
+
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    uint32_t after = 0;
+
+    const bool gotAfter =
+        copyUInt32Property(
+            service,
+            CFSTR("UseOverrideClientPowerBudgets"),
+            &after);
+
+    IOObjectRelease(service);
+
+    if (!gotAfter) {
+        std::fprintf(
+            stderr,
+            "setProperties succeeded but readback failed\n");
+        return 1;
+    }
+
+    std::printf(
+        "UseOverrideClientPowerBudgets before=%u after=%u\n",
+        before,
+        after);
+
+    return after == value ? 0 : 1;
+}
+
 static bool
 copyUInt32ArrayProperty(io_registry_entry_t entry,
                         CFStringRef key,
@@ -2667,6 +2809,8 @@ usage(const char *argv0)
         "  %s ppm-freshcell <0|1>\n"
         "  %s ppm-baseline-status\n"
         "  %s ppm-baseline <0|1>\n"
+        "  %s ppm-clientbudgets-status\n"
+        "  %s ppm-clientbudgets <0|1>\n"
         "  %s ppm-syscap-status\n"
         "  %s ppm-syscap <mW>\n"
         "  %s ppm-syscap-clear\n"
@@ -2682,6 +2826,8 @@ usage(const char *argv0)
         "status is metadata-only. read performs exactly one "
         "64-bit MMIO load. set-pstate performs one explicit "
         "read-modify-write transition on the selected cluster.\n",
+        argv0,
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -2840,6 +2986,51 @@ main(int argc, char **argv)
         }
 
         return ppmSetBaseline(
+            static_cast<uint32_t>(
+                parsed));
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-clientbudgets-status") == 0) {
+
+        if (argc != 2) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        return ppmClientBudgetsStatus();
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-clientbudgets") == 0) {
+
+        if (argc != 3) {
+            usage(argv[0]);
+            return 2;
+        }
+
+        char *end = nullptr;
+
+        const unsigned long parsed =
+            std::strtoul(
+                argv[2],
+                &end,
+                0);
+
+        if (!end ||
+            *end != '\0' ||
+            parsed > 1) {
+
+            std::fprintf(
+                stderr,
+                "client-budget override value must be 0 or 1\n");
+
+            return 2;
+        }
+
+        return ppmSetClientBudgets(
             static_cast<uint32_t>(
                 parsed));
     }
