@@ -1471,6 +1471,28 @@ ppmIOReport(unsigned intervalMs)
         return 1;
     }
 
+    for (CFStringRef subgroup :
+         probeSubgroups) {
+
+        CFDictionaryRef clientChannels =
+            api.copyChannelsInGroup(
+                CFSTR("PPM Stats"),
+                subgroup,
+                0,
+                0,
+                0);
+
+        if (!clientChannels)
+            continue;
+
+        api.mergeChannels(
+            channels,
+            clientChannels,
+            nullptr);
+
+        CFRelease(clientChannels);
+    }
+
     CFTypeRef discoveredObject =
         CFDictionaryGetValue(
             channels,
@@ -1518,19 +1540,48 @@ ppmIOReport(unsigned intervalMs)
         return 1;
     }
 
-    if (subscribed)
-        CFRelease(subscribed);
+    CFMutableDictionaryRef sampleChannels =
+        subscribed
+            ? subscribed
+            : channels;
+
+    if (subscribed) {
+        CFTypeRef subscribedObject =
+            CFDictionaryGetValue(
+                subscribed,
+                CFSTR("IOReportChannels"));
+
+        CFIndex subscribedCount = 0;
+
+        if (subscribedObject &&
+            CFGetTypeID(subscribedObject) ==
+                CFArrayGetTypeID()) {
+
+            subscribedCount =
+                CFArrayGetCount(
+                    static_cast<CFArrayRef>(
+                        subscribedObject));
+        }
+
+        std::printf(
+            "IOReport subscription accepted %ld channels\n",
+            static_cast<long>(
+                subscribedCount));
+    }
 
     CFDictionaryRef first =
         api.createSamples(
             subscription,
-            channels,
+            sampleChannels,
             nullptr);
 
     if (!first) {
         std::fprintf(
             stderr,
             "first IOReport sample failed\n");
+
+        if (subscribed)
+            CFRelease(subscribed);
 
         CFRelease(channels);
         dlclose(api.handle);
@@ -1544,7 +1595,7 @@ ppmIOReport(unsigned intervalMs)
     CFDictionaryRef second =
         api.createSamples(
             subscription,
-            channels,
+            sampleChannels,
             nullptr);
 
     if (!second) {
@@ -1553,6 +1604,10 @@ ppmIOReport(unsigned intervalMs)
             "second IOReport sample failed\n");
 
         CFRelease(first);
+
+        if (subscribed)
+            CFRelease(subscribed);
+
         CFRelease(channels);
         dlclose(api.handle);
 
@@ -1572,6 +1627,9 @@ ppmIOReport(unsigned intervalMs)
         std::fprintf(
             stderr,
             "IOReportCreateSamplesDelta failed\n");
+
+        if (subscribed)
+            CFRelease(subscribed);
 
         CFRelease(channels);
         dlclose(api.handle);
@@ -1593,6 +1651,10 @@ ppmIOReport(unsigned intervalMs)
             "PPM Stats delta has no IOReportChannels array\n");
 
         CFRelease(delta);
+
+        if (subscribed)
+            CFRelease(subscribed);
+
         CFRelease(channels);
         dlclose(api.handle);
 
@@ -1744,6 +1806,10 @@ ppmIOReport(unsigned intervalMs)
     }
 
     CFRelease(delta);
+
+    if (subscribed)
+        CFRelease(subscribed);
+
     CFRelease(channels);
     dlclose(api.handle);
 
