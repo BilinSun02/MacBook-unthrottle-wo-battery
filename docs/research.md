@@ -461,6 +461,27 @@ did not return those client channels. The CLI now explicitly queries and
 merges the Client2/5/6 subgroups. Unnamed states are printed as
 `state0`, `state1`, etc.
 
+### Client budget-index reporter discovery correction
+
+A second idle/CPU/GPU capture after explicitly querying the
+`Client2`/`Client5`/`Client6` subgroups still returned only the same ten
+group-wide PPM Stats channels. Therefore
+`IOReportCopyChannelsInGroup("PPM Stats", "ClientN", ...)` does not expose
+those client reporters on this target build.
+
+The IORegistry legend nevertheless confirms distinct client reporters:
+
+```text
+Client2 channel id 0x4267744964783032 -> "BgtIdx02"
+Client5 channel id 0x4267744964783035 -> "BgtIdx05"
+Client6 channel id 0x4267744964783036 -> "BgtIdx06"
+```
+
+The sampler now uses `IOReportCopyAllChannels(0, 0)`, subscribes to that
+complete discovered channel set, and filters the sampled output down to
+`PPM Stats` and `BgtIdx*` channels. This avoids relying on subgroup lookup
+semantics.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
