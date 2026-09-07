@@ -2371,31 +2371,15 @@ clpcIOReport(unsigned intervalMs)
     if (!loadIOReport(&api))
         return 1;
 
-    CFDictionaryRef copied =
-        api.copyChannelsInGroup(
-            CFSTR("CLPC Stats"),
-            nullptr,
-            0,
+    CFMutableDictionaryRef channels =
+        api.copyAllChannels(
             0,
             0);
 
-    if (!copied) {
+    if (!channels) {
         std::fprintf(
             stderr,
-            "IOReportCopyChannelsInGroup(CLPC Stats) returned null\n");
-        dlclose(api.handle);
-        return 1;
-    }
-
-    CFMutableDictionaryRef channels =
-        CFDictionaryCreateMutableCopy(
-            kCFAllocatorDefault,
-            0,
-            copied);
-
-    CFRelease(copied);
-
-    if (!channels) {
+            "IOReportCopyAllChannels returned null\n");
         dlclose(api.handle);
         return 1;
     }
@@ -2418,7 +2402,7 @@ clpcIOReport(unsigned intervalMs)
     }
 
     std::printf(
-        "CLPC Stats discovery: %ld channels\n",
+        "CLPC sampler discovery: %ld total channels\n",
         static_cast<long>(
             desiredCount));
 
@@ -2570,9 +2554,20 @@ clpcIOReport(unsigned intervalMs)
             static_cast<CFDictionaryRef>(
                 itemObject);
 
+        char group[128]{};
         char subgroup[128]{};
         char name[192]{};
         char unit[64]{};
+
+        cfStringToCString(
+            api.channelGetGroup(item),
+            group,
+            sizeof(group));
+
+        if (std::strcmp(
+                group,
+                "CLPC Stats") != 0)
+            continue;
 
         cfStringToCString(
             api.channelGetSubGroup(item),
