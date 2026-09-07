@@ -831,6 +831,10 @@ typedef struct IOReportSubscriptionRefStruct *
 struct IOReportAPI {
     void *handle = nullptr;
 
+    CFMutableDictionaryRef (*copyAllChannels)(
+        uint64_t,
+        uint64_t) = nullptr;
+
     CFDictionaryRef (*copyChannelsInGroup)(
         CFStringRef,
         CFStringRef,
@@ -960,6 +964,10 @@ loadIOReport(IOReportAPI *api)
     } while (0)
 
     LOAD_IOREPORT(
+        copyAllChannels,
+        "IOReportCopyAllChannels");
+
+    LOAD_IOREPORT(
         copyChannelsInGroup,
         "IOReportCopyChannelsInGroup");
 
@@ -1050,67 +1058,42 @@ ppmIOReport(unsigned intervalMs)
     if (!loadIOReport(&api))
         return 1;
 
-    CFDictionaryRef copied =
-        api.copyChannelsInGroup(
-            CFSTR("PPM Stats"),
-            nullptr,
-            0,
+    CFMutableDictionaryRef channels =
+        api.copyAllChannels(
             0,
             0);
 
-    if (!copied) {
+    if (!channels) {
         std::fprintf(
             stderr,
-            "IOReportCopyChannelsInGroup(\"PPM Stats\") returned null\n");
+            "IOReportCopyAllChannels returned null\n");
 
         dlclose(api.handle);
 
         return 1;
     }
 
-    const CFIndex copiedCount =
-        CFDictionaryGetCount(copied);
-
-    CFMutableDictionaryRef channels =
-        CFDictionaryCreateMutableCopy(
-            kCFAllocatorDefault,
-            copiedCount,
-            copied);
-
-    CFRelease(copied);
-
-    if (!channels) {
-        dlclose(api.handle);
-        return 1;
-    }
-
-    static const CFStringRef clientSubgroups[] = {
-        CFSTR("Client2"),
-        CFSTR("Client5"),
-        CFSTR("Client6"),
-    };
-
-    for (CFStringRef subgroup :
-         clientSubgroups) {
-
-        CFDictionaryRef clientChannels =
-            api.copyChannelsInGroup(
-                CFSTR("PPM Stats"),
-                subgroup,
-                0,
-                0,
-                0);
-
-        if (!clientChannels)
-            continue;
-
-        api.mergeChannels(
+    CFTypeRef discoveredObject =
+        CFDictionaryGetValue(
             channels,
-            clientChannels,
-            nullptr);
+            CFSTR("IOReportChannels"));
 
-        CFRelease(clientChannels);
+    CFIndex discoveredCount = 0;
+
+    if (discoveredObject &&
+        CFGetTypeID(discoveredObject) ==
+            CFArrayGetTypeID()) {
+
+        discoveredCount =
+            CFArrayGetCount(
+                static_cast<CFArrayRef>(
+                    discoveredObject));
     }
+
+    std::printf(
+        "IOReport discovery: %ld total channels\n",
+        static_cast<long>(
+            discoveredCount));
 
     CFMutableDictionaryRef subscribed =
         nullptr;
@@ -1226,7 +1209,7 @@ ppmIOReport(unsigned intervalMs)
         CFArrayGetCount(array);
 
     std::printf(
-        "PPM Stats over %u ms: %ld channels\n",
+        "IOReport delta over %u ms: %ld total sampled channels; printing PPM Stats/BgtIdx only\n",
         intervalMs,
         static_cast<long>(
             count));
@@ -1273,6 +1256,20 @@ ppmIOReport(unsigned intervalMs)
             api.channelGetUnitLabel(item),
             unit,
             sizeof(unit));
+
+        const bool ppmGroup =
+            std::strcmp(
+                group,
+                "PPM Stats") == 0;
+
+        const bool ppmNamedChannel =
+            std::strstr(
+                name,
+                "BgtIdx") != nullptr;
+
+        if (!ppmGroup &&
+            !ppmNamedChannel)
+            continue;
 
         const int32_t format =
             api.channelGetFormat(item);
