@@ -391,6 +391,9 @@ ppmSetPropertiesProbe()
     return after == 0 ? 0 : 1;
 }
 
+static io_service_t
+openPPMService();
+
 static int
 ppmFreshCellStatus()
 {
