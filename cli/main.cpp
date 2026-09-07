@@ -2272,6 +2272,8 @@ usage(const char *argv0)
         argv0,
         argv0,
         argv0,
+        argv0,
+        argv0,
         argv0);
 }
 
