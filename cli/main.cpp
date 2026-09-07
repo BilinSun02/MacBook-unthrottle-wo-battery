@@ -1465,6 +1465,37 @@ ppmIOReport(unsigned intervalMs)
                 0,
                 probe);
 
+        if (desired &&
+            probeArrayObject &&
+            CFGetTypeID(probeArrayObject) ==
+                CFArrayGetTypeID() &&
+            CFArrayGetCount(
+                static_cast<CFArrayRef>(
+                    probeArrayObject)) > 0) {
+
+            CFMutableArrayRef oneChannel =
+                CFArrayCreateMutable(
+                    kCFAllocatorDefault,
+                    1,
+                    &kCFTypeArrayCallBacks);
+
+            if (oneChannel) {
+                CFArrayAppendValue(
+                    oneChannel,
+                    CFArrayGetValueAtIndex(
+                        static_cast<CFArrayRef>(
+                            probeArrayObject),
+                        0));
+
+                CFDictionarySetValue(
+                    desired,
+                    CFSTR("IOReportChannels"),
+                    oneChannel);
+
+                CFRelease(oneChannel);
+            }
+        }
+
         CFMutableDictionaryRef subbed =
             nullptr;
 
