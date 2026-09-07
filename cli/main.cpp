@@ -838,6 +838,11 @@ struct IOReportAPI {
         uint64_t,
         uint64_t) = nullptr;
 
+    void (*mergeChannels)(
+        CFDictionaryRef,
+        CFDictionaryRef,
+        CFTypeRef) = nullptr;
+
     IOReportSubscriptionRef (*createSubscription)(
         void *,
         CFMutableDictionaryRef,
@@ -959,6 +964,10 @@ loadIOReport(IOReportAPI *api)
         "IOReportCopyChannelsInGroup");
 
     LOAD_IOREPORT(
+        mergeChannels,
+        "IOReportMergeChannels");
+
+    LOAD_IOREPORT(
         createSubscription,
         "IOReportCreateSubscription");
 
@@ -1073,6 +1082,34 @@ ppmIOReport(unsigned intervalMs)
     if (!channels) {
         dlclose(api.handle);
         return 1;
+    }
+
+    static const CFStringRef clientSubgroups[] = {
+        CFSTR("Client2"),
+        CFSTR("Client5"),
+        CFSTR("Client6"),
+    };
+
+    for (CFStringRef subgroup :
+         clientSubgroups) {
+
+        CFDictionaryRef clientChannels =
+            api.copyChannelsInGroup(
+                CFSTR("PPM Stats"),
+                subgroup,
+                0,
+                0,
+                0);
+
+        if (!clientChannels)
+            continue;
+
+        api.mergeChannels(
+            channels,
+            clientChannels,
+            nullptr);
+
+        CFRelease(clientChannels);
     }
 
     CFMutableDictionaryRef subscribed =
