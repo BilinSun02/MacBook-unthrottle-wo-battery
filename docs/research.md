@@ -392,6 +392,42 @@ sudo ./build/mbu ppm-syscap-clear
 The next investigation should focus on battery Pmax, predictive Pmax,
 per-client requested/granted budgets, and detailed thermal budgets.
 
+### GPU result and CPMS IOReport instrumentation
+
+The 50000 mW system-capability override did not produce a meaningful GPU
+compute improvement either. CPU remained mostly in the ~1704/1968 MHz range
+and the GPU benchmark remained very slow.
+
+This effectively retires the top-level system-capability override as the main
+faulted-battery throttle mechanism for this machine.
+
+The target ApplePassthroughPPM publishes IOReport groups including:
+
+```text
+PPM Stats / CPMS Lanes engagement
+PPM Stats / CPMS Power Reduction
+PPM Stats / CPMS Ferocity
+PPM Stats / Client2
+PPM Stats / Client5
+PPM Stats / Client6
+```
+
+The CLI now has a read-only sampler:
+
+```sh
+sudo ./build/mbu ppm-ioreport 1000
+```
+
+It dynamically loads `libIOReport.dylib`, subscribes only to the
+`PPM Stats` group, samples for the requested interval, computes a delta, and
+prints channel names plus simple values or state residencies. This should be
+used at idle, under CPU load, and under GPU load to identify which CPMS
+control-effort lane or client is engaging.
+
+`ppm-syscap-clear` now also restores the original
+`OverrideSystemCapability=(2147483647,2147483647,2147483647)` sentinel
+triplet while disabling the override flag.
+
 ### Read-only PPM probes
 
 The CLI includes two userspace-only probes that do not use MBUnthrottle.kext:
