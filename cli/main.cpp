@@ -1453,6 +1453,12 @@ ppmIOReport(unsigned intervalMs)
                 subgroupName);
         }
 
+        std::fprintf(
+            stderr,
+            "===== RAW IOREPORT SUBGROUP %s =====\n",
+            subgroupName);
+        CFShow(probe);
+
         CFMutableDictionaryRef desired =
             CFDictionaryCreateMutableCopy(
                 kCFAllocatorDefault,
