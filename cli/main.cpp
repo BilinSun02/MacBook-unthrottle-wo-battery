@@ -777,6 +777,23 @@ ppmClearSyscap()
         return 1;
     }
 
+    CFMutableArrayRef sentinel =
+        makeUInt32Array(
+            0x7fffffffU,
+            3);
+
+    if (!sentinel) {
+        CFRelease(disable);
+        CFRelease(properties);
+        IOObjectRelease(service);
+        return 1;
+    }
+
+    CFDictionarySetValue(
+        properties,
+        CFSTR("OverrideSystemCapability"),
+        sentinel);
+
     CFDictionarySetValue(
         properties,
         CFSTR("UseOverrideSystemCapability"),
@@ -787,6 +804,7 @@ ppmClearSyscap()
             service,
             properties);
 
+    CFRelease(sentinel);
     CFRelease(disable);
     CFRelease(properties);
     IOObjectRelease(service);
@@ -802,7 +820,7 @@ ppmClearSyscap()
     }
 
     std::printf(
-        "cleared system-capability override\n");
+        "cleared system-capability override and restored INT32_MAX sentinel values\n");
 
     return ppmSyscapStatus();
 }
