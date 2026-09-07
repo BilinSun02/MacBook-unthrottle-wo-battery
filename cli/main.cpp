@@ -1345,6 +1345,117 @@ ppmIOReport(unsigned intervalMs)
     if (!loadIOReport(&api))
         return 1;
 
+    static const CFStringRef probeSubgroups[] = {
+        CFSTR("Client2"),
+        CFSTR("Client5"),
+        CFSTR("Client6"),
+    };
+
+    for (CFStringRef subgroup :
+         probeSubgroups) {
+
+        CFDictionaryRef probe =
+            api.copyChannelsInGroup(
+                CFSTR("PPM Stats"),
+                subgroup,
+                0,
+                0,
+                0);
+
+        char subgroupName[64]{};
+
+        cfStringToCString(
+            subgroup,
+            subgroupName,
+            sizeof(subgroupName));
+
+        if (!probe) {
+            std::printf(
+                "IOReport subgroup query %s: null\n",
+                subgroupName);
+            continue;
+        }
+
+        CFTypeRef probeArrayObject =
+            CFDictionaryGetValue(
+                probe,
+                CFSTR("IOReportChannels"));
+
+        CFIndex probeCount = 0;
+
+        if (probeArrayObject &&
+            CFGetTypeID(probeArrayObject) ==
+                CFArrayGetTypeID()) {
+
+            CFArrayRef probeArray =
+                static_cast<CFArrayRef>(
+                    probeArrayObject);
+
+            probeCount =
+                CFArrayGetCount(
+                    probeArray);
+
+            std::printf(
+                "IOReport subgroup query %s: %ld channels\n",
+                subgroupName,
+                static_cast<long>(
+                    probeCount));
+
+            for (CFIndex i = 0;
+                 i < probeCount;
+                 ++i) {
+
+                CFTypeRef itemObject =
+                    CFArrayGetValueAtIndex(
+                        probeArray,
+                        i);
+
+                if (!itemObject ||
+                    CFGetTypeID(itemObject) !=
+                        CFDictionaryGetTypeID())
+                    continue;
+
+                CFDictionaryRef item =
+                    static_cast<CFDictionaryRef>(
+                        itemObject);
+
+                char group[128]{};
+                char actualSubgroup[128]{};
+                char name[128]{};
+
+                cfStringToCString(
+                    api.channelGetGroup(item),
+                    group,
+                    sizeof(group));
+
+                cfStringToCString(
+                    api.channelGetSubGroup(item),
+                    actualSubgroup,
+                    sizeof(actualSubgroup));
+
+                cfStringToCString(
+                    api.channelGetChannelName(item),
+                    name,
+                    sizeof(name));
+
+                std::printf(
+                    "  [%s] [%s] %s format=%d\n",
+                    group,
+                    actualSubgroup,
+                    name,
+                    api.channelGetFormat(item));
+            }
+        }
+
+        else {
+            std::printf(
+                "IOReport subgroup query %s: no IOReportChannels array\n",
+                subgroupName);
+        }
+
+        CFRelease(probe);
+    }
+
     CFMutableDictionaryRef channels =
         api.copyAllChannels(
             0,
