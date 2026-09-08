@@ -2369,6 +2369,243 @@ ppmIOReport(unsigned intervalMs)
 }
 
 
+
+static int
+ppmClientBudgetIOReport(unsigned intervalMs)
+{
+    IOReportAPI api{};
+
+    if (!loadIOReport(&api))
+        return 1;
+
+    static const CFStringRef subgroups[] = {
+        CFSTR("Client2"),
+        CFSTR("Client5"),
+        CFSTR("Client6"),
+    };
+
+    struct ClientSample {
+        CFStringRef subgroup = nullptr;
+        CFMutableDictionaryRef desired = nullptr;
+        CFMutableDictionaryRef subscribed = nullptr;
+        IOReportSubscriptionRef subscription = nullptr;
+        CFDictionaryRef first = nullptr;
+    } samples[3];
+
+    for (size_t i = 0; i < 3; ++i) {
+        samples[i].subgroup = subgroups[i];
+
+        CFDictionaryRef probe =
+            api.copyChannelsInGroup(
+                CFSTR("PPM Stats"),
+                subgroups[i],
+                0,
+                0,
+                0);
+
+        if (!probe)
+            continue;
+
+        samples[i].desired =
+            CFDictionaryCreateMutableCopy(
+                kCFAllocatorDefault,
+                0,
+                probe);
+
+        CFRelease(probe);
+
+        if (!samples[i].desired)
+            continue;
+
+        samples[i].subscription =
+            api.createSubscription(
+                nullptr,
+                samples[i].desired,
+                &samples[i].subscribed,
+                0,
+                nullptr);
+
+        if (!samples[i].subscription)
+            continue;
+
+        CFMutableDictionaryRef sampleSet =
+            samples[i].subscribed
+                ? samples[i].subscribed
+                : samples[i].desired;
+
+        samples[i].first =
+            api.createSamples(
+                samples[i].subscription,
+                sampleSet,
+                nullptr);
+    }
+
+    usleep(intervalMs * 1000U);
+
+    for (size_t i = 0; i < 3; ++i) {
+        char subgroupName[64]{};
+
+        cfStringToCString(
+            samples[i].subgroup,
+            subgroupName,
+            sizeof(subgroupName));
+
+        if (!samples[i].subscription ||
+            !samples[i].first) {
+
+            std::printf(
+                "[%s] unavailable\n",
+                subgroupName);
+            continue;
+        }
+
+        CFMutableDictionaryRef sampleSet =
+            samples[i].subscribed
+                ? samples[i].subscribed
+                : samples[i].desired;
+
+        CFDictionaryRef second =
+            api.createSamples(
+                samples[i].subscription,
+                sampleSet,
+                nullptr);
+
+        CFDictionaryRef delta =
+            second
+                ? api.createSamplesDelta(
+                    samples[i].first,
+                    second,
+                    nullptr)
+                : nullptr;
+
+        CFRelease(samples[i].first);
+        samples[i].first = nullptr;
+
+        if (second)
+            CFRelease(second);
+
+        if (!delta) {
+            std::printf(
+                "[%s] delta unavailable\n",
+                subgroupName);
+            continue;
+        }
+
+        CFTypeRef arrayObject =
+            CFDictionaryGetValue(
+                delta,
+                CFSTR("IOReportChannels"));
+
+        if (arrayObject &&
+            CFGetTypeID(arrayObject) ==
+                CFArrayGetTypeID()) {
+
+            CFArrayRef array =
+                static_cast<CFArrayRef>(
+                    arrayObject);
+
+            const CFIndex count =
+                CFArrayGetCount(array);
+
+            for (CFIndex j = 0; j < count; ++j) {
+                CFTypeRef itemObject =
+                    CFArrayGetValueAtIndex(
+                        array,
+                        j);
+
+                if (!itemObject ||
+                    CFGetTypeID(itemObject) !=
+                        CFDictionaryGetTypeID())
+                    continue;
+
+                CFDictionaryRef item =
+                    static_cast<CFDictionaryRef>(
+                        itemObject);
+
+                char name[128]{};
+
+                cfStringToCString(
+                    api.channelGetChannelName(item),
+                    name,
+                    sizeof(name));
+
+                const int32_t format =
+                    api.channelGetFormat(item);
+
+                std::printf(
+                    "[%s] %s format=%d",
+                    subgroupName,
+                    name,
+                    format);
+
+                if (format == 1) {
+                    const int64_t value =
+                        api.simpleGetIntegerValue(
+                            item,
+                            0);
+
+                    std::printf(
+                        " value=%lld",
+                        static_cast<long long>(
+                            value));
+                }
+                else if (format == 2) {
+                    const int32_t stateCount =
+                        api.stateGetCount(item);
+
+                    for (int32_t state = 0;
+                         state < stateCount;
+                         ++state) {
+
+                        char stateName[128]{};
+
+                        cfStringToCString(
+                            api.stateGetNameForIndex(
+                                item,
+                                state),
+                            stateName,
+                            sizeof(stateName));
+
+                        const int64_t residency =
+                            api.stateGetResidency(
+                                item,
+                                state);
+
+                        if (stateName[0] != '\0') {
+                            std::printf(
+                                " {%s=%lld}",
+                                stateName,
+                                static_cast<long long>(
+                                    residency));
+                        }
+                        else {
+                            std::printf(
+                                " {state%d=%lld}",
+                                state,
+                                static_cast<long long>(
+                                    residency));
+                        }
+                    }
+                }
+
+                std::printf("\n");
+            }
+        }
+
+        CFRelease(delta);
+    }
+
+    for (auto &sample : samples) {
+        if (sample.subscribed)
+            CFRelease(sample.subscribed);
+        if (sample.desired)
+            CFRelease(sample.desired);
+    }
+
+    dlclose(api.handle);
+    return 0;
+}
+
 static int
 ppmCPMSIOReport(unsigned intervalMs)
 {
@@ -3553,6 +3790,7 @@ usage(const char *argv0)
         "  %s ppm-syscap <mW>\n"
         "  %s ppm-syscap-clear\n"
         "  %s ppm-ioreport [milliseconds]\n"
+        "  %s ppm-client-ioreport [milliseconds]\n"
         "  %s ppm-cpms-ioreport [milliseconds]\n"
         "  %s clpc-ioreport [milliseconds]\n"
         "  %s ppm-open-scan\n"
@@ -3566,6 +3804,7 @@ usage(const char *argv0)
         "status is metadata-only. read performs exactly one "
         "64-bit MMIO load. set-pstate performs one explicit "
         "read-modify-write transition on the selected cluster.\n",
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -3641,6 +3880,50 @@ main(int argc, char **argv)
         }
 
         return clpcIOReport(
+            intervalMs);
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-client-ioreport") == 0) {
+
+        if (argc < 2 ||
+            argc > 3) {
+
+            usage(argv[0]);
+            return 2;
+        }
+
+        unsigned intervalMs =
+            250;
+
+        if (argc == 3) {
+            char *end = nullptr;
+
+            const unsigned long parsed =
+                std::strtoul(
+                    argv[2],
+                    &end,
+                    0);
+
+            if (!end ||
+                *end != '\0' ||
+                parsed < 10 ||
+                parsed > 60000) {
+
+                std::fprintf(
+                    stderr,
+                    "IOReport interval must be 10..60000 ms\n");
+
+                return 2;
+            }
+
+            intervalMs =
+                static_cast<unsigned>(
+                    parsed);
+        }
+
+        return ppmClientBudgetIOReport(
             intervalMs);
     }
 
