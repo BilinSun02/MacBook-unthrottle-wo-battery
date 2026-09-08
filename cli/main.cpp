@@ -2368,6 +2368,272 @@ ppmIOReport(unsigned intervalMs)
     return 0;
 }
 
+
+static int
+ppmCPMSIOReport(unsigned intervalMs)
+{
+    IOReportAPI api{};
+
+    if (!loadIOReport(&api))
+        return 1;
+
+    static const CFStringRef subgroups[] = {
+        CFSTR("Droop Controller"),
+        CFSTR("CPMS Lanes engagement"),
+        CFSTR("CPMS Power Reduction"),
+        CFSTR("CPMS Ferocity"),
+        CFSTR("Policy CPMS"),
+    };
+
+    CFMutableDictionaryRef channels = nullptr;
+
+    for (CFStringRef subgroup : subgroups) {
+        CFDictionaryRef one =
+            api.copyChannelsInGroup(
+                CFSTR("PPM Stats"),
+                subgroup,
+                0,
+                0,
+                0);
+
+        if (!one)
+            continue;
+
+        if (!channels) {
+            channels =
+                CFDictionaryCreateMutableCopy(
+                    kCFAllocatorDefault,
+                    0,
+                    one);
+        }
+        else {
+            api.mergeChannels(
+                channels,
+                one,
+                nullptr);
+        }
+
+        CFRelease(one);
+    }
+
+    if (!channels) {
+        std::fprintf(
+            stderr,
+            "no CPMS PPM Stats channels found\n");
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFMutableDictionaryRef subscribed = nullptr;
+
+    IOReportSubscriptionRef subscription =
+        api.createSubscription(
+            nullptr,
+            channels,
+            &subscribed,
+            0,
+            nullptr);
+
+    if (!subscription) {
+        std::fprintf(
+            stderr,
+            "CPMS IOReport subscription failed\n");
+        if (subscribed)
+            CFRelease(subscribed);
+        CFRelease(channels);
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFMutableDictionaryRef sampleChannels =
+        subscribed
+            ? subscribed
+            : channels;
+
+    CFDictionaryRef first =
+        api.createSamples(
+            subscription,
+            sampleChannels,
+            nullptr);
+
+    if (!first) {
+        std::fprintf(
+            stderr,
+            "first CPMS IOReport sample failed\n");
+        if (subscribed)
+            CFRelease(subscribed);
+        CFRelease(channels);
+        dlclose(api.handle);
+        return 1;
+    }
+
+    usleep(intervalMs * 1000U);
+
+    CFDictionaryRef second =
+        api.createSamples(
+            subscription,
+            sampleChannels,
+            nullptr);
+
+    if (!second) {
+        std::fprintf(
+            stderr,
+            "second CPMS IOReport sample failed\n");
+        CFRelease(first);
+        if (subscribed)
+            CFRelease(subscribed);
+        CFRelease(channels);
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFDictionaryRef delta =
+        api.createSamplesDelta(
+            first,
+            second,
+            nullptr);
+
+    CFRelease(first);
+    CFRelease(second);
+
+    if (!delta) {
+        std::fprintf(
+            stderr,
+            "CPMS IOReport delta failed\n");
+        if (subscribed)
+            CFRelease(subscribed);
+        CFRelease(channels);
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFTypeRef arrayObject =
+        CFDictionaryGetValue(
+            delta,
+            CFSTR("IOReportChannels"));
+
+    if (!arrayObject ||
+        CFGetTypeID(arrayObject) !=
+            CFArrayGetTypeID()) {
+
+        std::fprintf(
+            stderr,
+            "CPMS delta has no channels array\n");
+        CFRelease(delta);
+        if (subscribed)
+            CFRelease(subscribed);
+        CFRelease(channels);
+        dlclose(api.handle);
+        return 1;
+    }
+
+    CFArrayRef array =
+        static_cast<CFArrayRef>(
+            arrayObject);
+
+    const CFIndex count =
+        CFArrayGetCount(array);
+
+    for (CFIndex i = 0; i < count; ++i) {
+        CFTypeRef itemObject =
+            CFArrayGetValueAtIndex(
+                array,
+                i);
+
+        if (!itemObject ||
+            CFGetTypeID(itemObject) !=
+                CFDictionaryGetTypeID())
+            continue;
+
+        CFDictionaryRef item =
+            static_cast<CFDictionaryRef>(
+                itemObject);
+
+        char subgroup[128]{};
+        char name[128]{};
+
+        cfStringToCString(
+            api.channelGetSubGroup(item),
+            subgroup,
+            sizeof(subgroup));
+
+        cfStringToCString(
+            api.channelGetChannelName(item),
+            name,
+            sizeof(name));
+
+        const int32_t format =
+            api.channelGetFormat(item);
+
+        std::printf(
+            "[%s] %s format=%d",
+            subgroup,
+            name,
+            format);
+
+        if (format == 1) {
+            const int64_t value =
+                api.simpleGetIntegerValue(
+                    item,
+                    0);
+
+            std::printf(
+                " value=%lld",
+                static_cast<long long>(
+                    value));
+        }
+        else if (format == 2) {
+            const int32_t stateCount =
+                api.stateGetCount(item);
+
+            for (int32_t state = 0;
+                 state < stateCount;
+                 ++state) {
+
+                char stateName[128]{};
+
+                cfStringToCString(
+                    api.stateGetNameForIndex(
+                        item,
+                        state),
+                    stateName,
+                    sizeof(stateName));
+
+                const int64_t residency =
+                    api.stateGetResidency(
+                        item,
+                        state);
+
+                if (stateName[0] != '\0') {
+                    std::printf(
+                        " {%s=%lld}",
+                        stateName,
+                        static_cast<long long>(
+                            residency));
+                }
+                else {
+                    std::printf(
+                        " {state%d=%lld}",
+                        state,
+                        static_cast<long long>(
+                            residency));
+                }
+            }
+        }
+
+        std::printf("\n");
+    }
+
+    CFRelease(delta);
+
+    if (subscribed)
+        CFRelease(subscribed);
+
+    CFRelease(channels);
+    dlclose(api.handle);
+    return 0;
+}
+
 static int
 clpcIOReport(unsigned intervalMs)
 {
@@ -3284,6 +3550,7 @@ usage(const char *argv0)
         "  %s ppm-syscap <mW>\n"
         "  %s ppm-syscap-clear\n"
         "  %s ppm-ioreport [milliseconds]\n"
+        "  %s ppm-cpms-ioreport [milliseconds]\n"
         "  %s clpc-ioreport [milliseconds]\n"
         "  %s ppm-open-scan\n"
         "  %s ppm-cpms\n"
@@ -3296,6 +3563,7 @@ usage(const char *argv0)
         "status is metadata-only. read performs exactly one "
         "64-bit MMIO load. set-pstate performs one explicit "
         "read-modify-write transition on the selected cluster.\n",
+        argv0,
         argv0,
         argv0,
         argv0,
@@ -3370,6 +3638,50 @@ main(int argc, char **argv)
         }
 
         return clpcIOReport(
+            intervalMs);
+    }
+
+    if (std::strcmp(
+            argv[1],
+            "ppm-cpms-ioreport") == 0) {
+
+        if (argc < 2 ||
+            argc > 3) {
+
+            usage(argv[0]);
+            return 2;
+        }
+
+        unsigned intervalMs =
+            250;
+
+        if (argc == 3) {
+            char *end = nullptr;
+
+            const unsigned long parsed =
+                std::strtoul(
+                    argv[2],
+                    &end,
+                    0);
+
+            if (!end ||
+                *end != '\0' ||
+                parsed < 10 ||
+                parsed > 60000) {
+
+                std::fprintf(
+                    stderr,
+                    "IOReport interval must be 10..60000 ms\n");
+
+                return 2;
+            }
+
+            intervalMs =
+                static_cast<unsigned>(
+                    parsed);
+        }
+
+        return ppmCPMSIOReport(
             intervalMs);
     }
 
