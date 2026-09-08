@@ -1648,6 +1648,11 @@ ppmIOReport(unsigned intervalMs)
         CFSTR("Client2"),
         CFSTR("Client5"),
         CFSTR("Client6"),
+        CFSTR("Droop Controller"),
+        CFSTR("CPMS Lanes engagement"),
+        CFSTR("CPMS Power Reduction"),
+        CFSTR("CPMS Ferocity"),
+        CFSTR("Policy CPMS"),
     };
 
     for (CFStringRef subgroup :
