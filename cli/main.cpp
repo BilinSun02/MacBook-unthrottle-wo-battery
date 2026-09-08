@@ -2378,6 +2378,9 @@ ppmCPMSIOReport(unsigned intervalMs)
         return 1;
 
     static const CFStringRef subgroups[] = {
+        CFSTR("Client2"),
+        CFSTR("Client5"),
+        CFSTR("Client6"),
         CFSTR("Droop Controller"),
         CFSTR("CPMS Lanes engagement"),
         CFSTR("CPMS Power Reduction"),
